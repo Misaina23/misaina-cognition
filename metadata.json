@@ -1,0 +1,8 @@
+{
+  "name": "Misaina Cognition",
+  "description": "Moteur de connaissance augmentée pour l'entreprise",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
