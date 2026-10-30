@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
       fullName: user.fullName,
       role: user.role,
       department: user.department,
+      clearanceLevel: user.clearanceLevel || "C2",
     });
   } catch (error) {
     return NextResponse.json({ message: "Erreur serveur interne" }, { status: 500 });

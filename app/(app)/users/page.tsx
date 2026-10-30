@@ -24,6 +24,7 @@ export default function UsersPage() {
     email: "",
     role: "EMPLOYEE",
     department: "R&D",
+    clearanceLevel: "C2" as "C1" | "C2" | "C3" | "C4",
   });
   const [addError, setAddError] = useState("");
 
@@ -38,7 +39,7 @@ export default function UsersPage() {
       qc.invalidateQueries({ queryKey: ["users"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       setIsAddOpen(false);
-      setForm({ fullName: "", email: "", role: "EMPLOYEE", department: "R&D" });
+      setForm({ fullName: "", email: "", role: "EMPLOYEE", department: "R&D", clearanceLevel: "C2" });
     },
     onError: (err: any) => {
       setAddError(err?.response?.data?.message || "Erreur lors de l'ajout");
@@ -171,8 +172,12 @@ export default function UsersPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                <div className="flex items-center gap-2.5 self-end sm:self-center shrink-0">
                   {getRoleBadge(u.role)}
+
+                  <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded border border-border bg-muted/60 text-foreground" title="Habilitation PSSI">
+                    {u.clearanceLevel || "C2"}
+                  </span>
 
                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                     <CheckCircle2 size={12} /> Actif
@@ -234,13 +239,13 @@ export default function UsersPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Rôle</label>
                 <select
                   value={form.role}
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="flex h-9 w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                  className="flex h-9 w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary"
                 >
                   <option value="EMPLOYEE">Employé</option>
                   <option value="MANAGER">Manager</option>
@@ -252,10 +257,24 @@ export default function UsersPage() {
                 <label className="text-xs font-semibold text-muted-foreground">Département</label>
                 <Input
                   required
-                  placeholder="Ex: R&D, RH, Sécurité"
+                  placeholder="Ex: R&D, RH"
                   value={form.department}
                   onChange={(e) => setForm({ ...form, department: e.target.value })}
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground">Habilitation PSSI</label>
+                <select
+                  value={form.clearanceLevel}
+                  onChange={(e) => setForm({ ...form, clearanceLevel: e.target.value as any })}
+                  className="flex h-9 w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono font-medium outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="C1">C1 - Public</option>
+                  <option value="C2">C2 - Interne</option>
+                  <option value="C3">C3 - Confidentiel</option>
+                  <option value="C4">C4 - Secret PSSI</option>
+                </select>
               </div>
             </div>
 

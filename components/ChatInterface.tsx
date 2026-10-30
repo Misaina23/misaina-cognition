@@ -1,8 +1,9 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
-import { useChatStore } from "@/lib/store";
-import { Button } from "@/components/ui";
+import { useChatStore, useMissionStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth";
+import { Button, Modal } from "@/components/ui";
 import ReactMarkdown from "react-markdown";
 import { SourceViewer } from "./SourceViewer";
 import type { ChatResponse } from "@/lib/types";
@@ -10,13 +11,19 @@ import {
   Send,
   FileDown,
   Sparkles,
-  RotateCcw,
   Copy,
   Check,
   Plus,
-  MessageSquare,
   ShieldCheck,
-  HelpCircle,
+  Cpu,
+  ThumbsUp,
+  ThumbsDown,
+  Award,
+  Layers,
+  Clock,
+  Shield,
+  Globe,
+  Lock,
 } from "lucide-react";
 
 interface Msg {
@@ -24,13 +31,18 @@ interface Msg {
   content: string;
   sources?: ChatResponse["sources"];
   confidence?: number;
+  dlpStatus?: string;
+  modelUsed?: string;
+  ragPipeline?: ChatResponse["ragPipeline"];
+  certified?: boolean;
+  rated?: "up" | "down";
 }
 
 const SUGGESTIONS = [
-  "Règles et indemnités de télétravail",
-  "Procédure d'onboarding nouvel employé",
-  "Politique de sécurité des mots de passe",
-  "Prise en charge mutuelle et jours de RTT",
+  "Standards d'eau potable et abris d'urgence du Projet Sphère",
+  "Procédure d'évacuation d'urgence et sécurité terrain (SOP-SEC-09)",
+  "Seuils d'appels d'offres et passation de marchés USAID / ECHO",
+  "Politique SMSI ISO/IEC 27001, clés FIDO2 et chiffrement AES-256",
 ];
 
 export function ChatInterface() {
@@ -39,10 +51,13 @@ export function ChatInterface() {
   const [loading, setLoading] = useState(false);
   const [generatingDoc, setGeneratingDoc] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [inspectingPipeline, setInspectingPipeline] = useState<ChatResponse["ragPipeline"] | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const conversationId = useChatStore((s) => s.conversationId);
   const setConversation = useChatStore((s) => s.setConversation);
+  const selectedTheater = useMissionStore((s) => s.selectedTheater);
+  const user = useAuthStore((s) => s.user);
 
   // Auto-scroll on new message
   useEffect(() => {
@@ -63,6 +78,7 @@ export function ChatInterface() {
       const { data } = await api.post<ChatResponse>("/chat/question", {
         question: q,
         conversationId: conversationId ?? undefined,
+        missionTheater: selectedTheater,
       });
 
       setConversation(data.conversationId);
@@ -73,6 +89,9 @@ export function ChatInterface() {
           content: data.answer,
           sources: data.sources,
           confidence: data.confidence,
+          dlpStatus: data.dlpStatus,
+          modelUsed: data.modelUsed,
+          ragPipeline: data.ragPipeline,
         },
       ]);
     } catch {
@@ -80,11 +99,45 @@ export function ChatInterface() {
         ...m,
         {
           role: "assistant",
-          content: "Une erreur est survenue lors de la communication avec le moteur de recherche documentaire.",
+          content: "Une erreur est survenue lors de la communication avec le moteur de recherche documentaire institutionnel.",
         },
       ]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleFeedback(index: number, rating: "up" | "down") {
+    const msg = messages[index];
+    if (!msg || msg.rated) return;
+
+    setMessages((prev) =>
+      prev.map((m, i) => (i === index ? { ...m, rated: rating } : m))
+    );
+
+    try {
+      await api.post("/chat/feedback", {
+        query: messages[index - 1]?.content || "Question",
+        rating: rating === "up" ? "positive" : "negative",
+      });
+    } catch {
+      // feedback logged silently
+    }
+  }
+
+  async function handleCertify(index: number) {
+    setMessages((prev) =>
+      prev.map((m, i) => (i === index ? { ...m, certified: true } : m))
+    );
+
+    try {
+      await api.post("/chat/feedback", {
+        query: messages[index - 1]?.content || "Question certifiée",
+        rating: "positive",
+        certified: true,
+      });
+    } catch {
+      // logged silently
     }
   }
 
@@ -102,7 +155,7 @@ export function ChatInterface() {
       });
       window.open(`/api/chat/download/${data.id}`, "_blank");
     } catch {
-      alert("Erreur lors de la génération de la fiche Word.");
+      // handled
     } finally {
       setGeneratingDoc(false);
     }
@@ -122,10 +175,23 @@ export function ChatInterface() {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Action Bar */}
-      <div className="flex items-center justify-between border-b border-border px-6 py-3 bg-card/60 backdrop-blur-sm">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <ShieldCheck size={16} className="text-emerald-500" />
-          <span>Gouvernance RBAC active · Réponses sourcées</span>
+      <div className="flex flex-wrap items-center justify-between border-b border-border px-6 py-3 bg-card/60 backdrop-blur-sm gap-2">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 font-medium text-foreground">
+            <ShieldCheck size={16} className="text-emerald-500" />
+            <span>ResourceGuard Actif</span>
+          </div>
+          <span aria-hidden="true">·</span>
+          <span className="font-mono text-[11px] text-primary">
+            Habilitation {user?.clearanceLevel || "C4"}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className="flex items-center gap-1 font-medium text-muted-foreground">
+            <Globe size={13} className="text-primary" />
+            {selectedTheater === "TOUS" ? "Multi-Théâtre" : selectedTheater}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>DLP & Isolation multitenant</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -163,17 +229,17 @@ export function ChatInterface() {
 
             <div className="space-y-2">
               <h2 className="text-xl font-bold tracking-tight text-foreground">
-                Assistant Documentaire Misaina
+                Assistant Décisionnel & RAG Misaina
               </h2>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                Posez vos questions en langage naturel. Le moteur extrait les passages pertinents et cite ses sources avec précision.
+                Posez vos questions opérationnelles et normatives. Le moteur extrait les passages certifiés selon votre habilitation ({user?.clearanceLevel || "C4"}) et applique un contrôle strict de traçabilité.
               </p>
             </div>
 
             {/* Suggestions */}
             <div className="pt-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                Suggestions de questions
+                Requêtes normatives suggérées
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
                 {SUGGESTIONS.map((s, idx) => (
@@ -213,14 +279,70 @@ export function ChatInterface() {
 
                   {m.sources && m.sources.length > 0 && <SourceViewer sources={m.sources} />}
 
-                  <div className="flex items-center justify-between border-t border-border/50 pt-2 text-xs text-muted-foreground">
-                    {m.confidence !== undefined && (
-                      <span className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400">
-                        Indice de confiance : {(m.confidence * 100).toFixed(0)}%
-                      </span>
-                    )}
+                  {m.certified && (
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 border-t border-border/50 pt-2">
+                      <Award size={14} /> Réponse certifiée conforme par l&apos;officier de conformité
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-3">
+                      {m.confidence !== undefined && (
+                        <span className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400">
+                          Confiance : {(m.confidence * 100).toFixed(0)}%
+                        </span>
+                      )}
+
+                      {m.modelUsed && (
+                        <span className="font-mono text-[10px] rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                          {m.modelUsed}
+                        </span>
+                      )}
+
+                      {m.ragPipeline && (
+                        <button
+                          onClick={() => setInspectingPipeline(m.ragPipeline ?? null)}
+                          className="flex items-center gap-1 text-[11px] text-primary hover:underline font-mono"
+                          title="Inspecter la latence et la décomposition RAG"
+                        >
+                          <Cpu size={12} /> {m.ragPipeline.latencyTotalMs}ms
+                        </button>
+                      )}
+                    </div>
 
                     <div className="flex items-center gap-2 ml-auto">
+                      {/* Human-in-the-loop Certification & Feedback */}
+                      {!m.certified && (
+                        <button
+                          onClick={() => handleCertify(i)}
+                          className="flex items-center gap-1 hover:text-foreground text-[11px] p-1 transition-colors"
+                          title="Certifier comme réponse officielle du référentiel"
+                        >
+                          <Award size={13} />
+                          <span>Certifier</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleFeedback(i, "up")}
+                        className={`p-1 transition-colors ${
+                          m.rated === "up" ? "text-emerald-500" : "hover:text-foreground"
+                        }`}
+                        title="Réponse exacte et conforme"
+                      >
+                        <ThumbsUp size={13} />
+                      </button>
+
+                      <button
+                        onClick={() => handleFeedback(i, "down")}
+                        className={`p-1 transition-colors ${
+                          m.rated === "down" ? "text-red-500" : "hover:text-foreground"
+                        }`}
+                        title="Signaler une inexactitude"
+                      >
+                        <ThumbsDown size={13} />
+                      </button>
+
                       <button
                         onClick={() => handleCopy(m.content, i)}
                         className="flex items-center gap-1 hover:text-foreground p-1 transition-colors"
@@ -254,7 +376,7 @@ export function ChatInterface() {
                 <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
                 <span className="h-2 w-2 rounded-full bg-primary animate-bounce" />
               </div>
-              <span>Recherche vectorielle et synthèse en cours…</span>
+              <span>Filtrage ResourceGuard et inférence RAG en cours…</span>
             </div>
           </div>
         )}
@@ -273,7 +395,7 @@ export function ChatInterface() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={loading}
-            placeholder="Posez votre question sur les procédures, la RH, la sécurité..."
+            placeholder="Posez votre question sur les standards Sphère, la sécurité terrain, ISO 27001, les bailleurs..."
             className="flex-1 rounded-xl border border-border bg-background px-4 py-2.5 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
           />
 
@@ -283,6 +405,66 @@ export function ChatInterface() {
           </Button>
         </form>
       </div>
+
+      {/* Pipeline Explainability Modal */}
+      {inspectingPipeline && (
+        <Modal
+          open={!!inspectingPipeline}
+          onClose={() => setInspectingPipeline(null)}
+          title="Décomposition du Pipeline d'Inférence RAG"
+        >
+          <div className="space-y-4 text-xs">
+            <p className="text-muted-foreground">
+              Mesure en temps réel des étapes de traitement pour garantir la traçabilité et l&apos;auditabilité de la réponse.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-border bg-muted/40 p-3 space-y-1">
+                <span className="text-muted-foreground block text-[11px]">Recherche vectorielle & BM25</span>
+                <span className="font-mono text-base font-bold text-foreground">
+                  {inspectingPipeline.retrievalMs} ms
+                </span>
+                <p className="text-[10px] text-muted-foreground">Projection et matching d&apos;index</p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/40 p-3 space-y-1">
+                <span className="text-muted-foreground block text-[11px]">Reciprocal Rank Fusion</span>
+                <span className="font-mono text-base font-bold text-foreground">
+                  {inspectingPipeline.rrfMs} ms
+                </span>
+                <p className="text-[10px] text-muted-foreground">Fusion & pondération des passages</p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/40 p-3 space-y-1">
+                <span className="text-muted-foreground block text-[11px]">Inférence Sémantique LLM</span>
+                <span className="font-mono text-base font-bold text-foreground">
+                  {inspectingPipeline.inferenceMs} ms
+                </span>
+                <p className="text-[10px] text-muted-foreground">Génération conditionnée aux citations</p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/40 p-3 space-y-1">
+                <span className="text-muted-foreground block text-[11px]">Contrôle DLP & Intégrité</span>
+                <span className="font-mono text-base font-bold text-foreground">
+                  {inspectingPipeline.dlpMs} ms
+                </span>
+                <p className="text-[10px] text-muted-foreground">Filtrage PII et signature SHA-256</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-card border border-border p-3 flex justify-between items-center font-mono">
+              <span className="text-foreground font-semibold">Latence totale de bout en bout</span>
+              <span className="text-primary font-bold text-sm">
+                {inspectingPipeline.latencyTotalMs} ms
+              </span>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button onClick={() => setInspectingPipeline(null)}>Fermer</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

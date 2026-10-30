@@ -14,5 +14,6 @@ export async function GET(req: NextRequest) {
     fullName: user.fullName,
     role: user.role,
     department: user.department,
+    clearanceLevel: user.clearanceLevel || "C2",
   });
 }

@@ -14,6 +14,11 @@ import {
   Sparkles,
   Shield,
   Layers,
+  Database,
+  ShieldCheck,
+  Globe,
+  FileDiff,
+  KeyRound,
 } from "lucide-react";
 import { useThemeStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth";
@@ -21,9 +26,13 @@ import { useAuthStore } from "@/lib/auth";
 const nav = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/chat", label: "Assistant IA", icon: MessageSquare },
-  { href: "/documents", label: "Documents", icon: FileText },
-  { href: "/analytics", label: "Analytiques", icon: BarChart3 },
-  { href: "/users", label: "Collaborateurs", icon: Users },
+  { href: "/documents", label: "Base documentaire", icon: FileText },
+  { href: "/diff", label: "Comparateur de versions", icon: FileDiff },
+  { href: "/connectors", label: "Connecteurs SI", icon: Database },
+  { href: "/audit", label: "Audit & PSSI", icon: ShieldCheck },
+  { href: "/analytics", label: "Analytiques RAG", icon: BarChart3 },
+  { href: "/api-keys", label: "Clés d'API & SI", icon: KeyRound },
+  { href: "/users", label: "Gouvernance & Rôles", icon: Users },
 ];
 
 export function Sidebar() {
@@ -37,9 +46,11 @@ export function Sidebar() {
   const isAdmin = user?.role === "ADMIN";
   const isManager = user?.role === "MANAGER" || isAdmin;
 
-  const visibleNav = nav.filter((n) =>
-    n.href === "/users" ? isAdmin : n.href === "/analytics" ? isManager : true
-  );
+  const visibleNav = nav.filter((n) => {
+    if (n.href === "/users") return isAdmin;
+    if (n.href === "/analytics" || n.href === "/audit" || n.href === "/api-keys") return isManager;
+    return true;
+  });
 
   const initials = user?.fullName
     ? user.fullName
@@ -98,8 +109,19 @@ export function Sidebar() {
         })}
       </nav>
 
+      {/* Public Showcase Link */}
+      <div className="py-2 border-t border-border/70">
+        <Link
+          href="/"
+          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <Globe size={15} />
+          <span>Site vitrine public</span>
+        </Link>
+      </div>
+
       {/* User Information & Quick Utilities */}
-      <div className="mt-auto border-t border-border pt-4 space-y-2">
+      <div className="mt-auto border-t border-border pt-3 space-y-2">
         <Link
           href="/profile"
           className={cn(

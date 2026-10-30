@@ -148,10 +148,15 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="text-center text-xs text-muted-foreground border-t border-border pt-4">
-          Nouveau collaborateur ?{" "}
-          <Link href="/register" className="text-primary font-semibold hover:underline">
-            Créer un compte
+        <div className="text-center text-xs text-muted-foreground border-t border-border pt-4 flex flex-col items-center gap-2">
+          <div>
+            Nouveau collaborateur ?{" "}
+            <Link href="/register" className="text-primary font-semibold hover:underline">
+              Créer un compte
+            </Link>
+          </div>
+          <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
+            ← Revenir au site vitrine public
           </Link>
         </div>
       </Card>

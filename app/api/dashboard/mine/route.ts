@@ -26,8 +26,8 @@ export async function GET(req: NextRequest) {
 
   if (recentActivity.length === 0) {
     recentActivity.push(
-      { type: "Document", title: "Guide RH & Avantages Sociaux 2026", at: new Date(Date.now() - 86400000).toISOString() },
-      { type: "Question", title: "Politique de télétravail hybride", at: new Date(Date.now() - 40000000).toISOString() }
+      { type: "Document", title: "Charte Humanitaire du Projet Sphère 2024", at: new Date(Date.now() - 86400000).toISOString() },
+      { type: "Question", title: "Standards minimaux d'eau potable WASH et Abris", at: new Date(Date.now() - 40000000).toISOString() }
     );
   }
 

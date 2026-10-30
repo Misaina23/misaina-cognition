@@ -1,6 +1,6 @@
 {
   "name": "Misaina Cognition",
-  "description": "Moteur de connaissance augmentée pour l'entreprise",
+  "description": "Plateforme d'intelligence documentaire, gouvernance RAG et conformité pour organisations internationales et entreprises",
   "permissions": [],
   "capabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

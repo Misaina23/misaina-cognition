@@ -10,9 +10,15 @@ export async function GET() {
     size: d.size,
     uploadedBy: d.uploadedBy,
     department: d.department,
+    classification: d.classification || "C2",
+    theater: d.theater || "Tous",
+    category: d.category || "Général",
+    tags: d.tags || "",
+    summary: d.summary || "",
     version: d.version,
     status: d.status,
     createdAt: d.createdAt,
+    chunksCount: d.chunks?.length || 0,
   }));
   return NextResponse.json(docs);
 }

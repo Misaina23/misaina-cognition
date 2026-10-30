@@ -99,6 +99,12 @@ export default function ProfilePage() {
               <span className="font-medium text-foreground">{user?.department}</span>
             </div>
             <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Habilitation PSSI</span>
+              <span className="inline-flex items-center gap-1 font-mono font-bold text-xs px-2 py-0.5 rounded-md border border-primary/20 bg-primary/10 text-primary">
+                <Shield size={12} /> {user?.clearanceLevel || "C2"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Statut</span>
               <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
                 <BadgeCheck size={14} /> Actif & Certifié

@@ -16,8 +16,12 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Misaina Cognition — Moteur de Connaissance Augmentée",
-  description: "Plateforme d'intelligence documentaire d'entreprise, recherche hybride RAG et synthèses vérifiées.",
+  title: "Misaina Cognition — Plateforme RAG & Gouvernance Institutionnelle",
+  description: "Plateforme d'intelligence documentaire, gouvernance RAG et conformité pour organisations internationales et entreprises",
+  openGraph: {
+    title: "Misaina Cognition — Plateforme RAG & Gouvernance Institutionnelle",
+    description: "Plateforme d'intelligence documentaire, gouvernance RAG et conformité pour organisations internationales et entreprises",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

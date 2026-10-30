@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { X } from "lucide-react";
 
 export function Button({
   className,
@@ -107,16 +108,19 @@ export function Badge({
 
 export function Modal({
   isOpen,
+  open,
   onClose,
   title,
   children,
 }: {
-  isOpen: boolean;
+  isOpen?: boolean;
+  open?: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
 }) {
-  if (!isOpen) return null;
+  const isVisible = open !== undefined ? open : isOpen;
+  if (!isVisible) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
@@ -126,8 +130,9 @@ export function Modal({
           <button
             onClick={onClose}
             className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Fermer"
           >
-            ✕
+            <X size={16} />
           </button>
         </div>
         {children}

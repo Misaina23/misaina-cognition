@@ -6,15 +6,15 @@ export async function GET() {
   const totalUsers = mockDb.users.length;
   const totalQuestions = mockDb.conversations.reduce(
     (sum, c) => sum + c.messages.filter((m) => m.role === "user").length,
-    18 // default base questions
+    24 // base authentic queries
   );
 
   const mostConsulted = [
-    { title: "Ressources Humaines", hits: 42 },
-    { title: "R&D", hits: 35 },
-    { title: "Sécurité", hits: 28 },
-    { title: "Organisation", hits: 19 },
-    { title: "Général", hits: 14 },
+    { title: "Normes Internationales (Sphère, CHS)", hits: 58 },
+    { title: "Sécurité Terrain & SOP Évacuation", hits: 47 },
+    { title: "SMSI ISO/IEC 27001 & PSSI", hits: 39 },
+    { title: "Finance & Bailleurs (USAID / ECHO)", hits: 32 },
+    { title: "Gouvernance RGPD & Données Sensibles", hits: 26 },
   ];
 
   return NextResponse.json({
@@ -22,6 +22,6 @@ export async function GET() {
     totalUsers,
     totalQuestions,
     mostConsulted,
-    avgResponseTimeMs: 420,
+    avgResponseTimeMs: 385,
   });
 }

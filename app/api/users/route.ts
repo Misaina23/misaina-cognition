@@ -8,6 +8,7 @@ export async function GET() {
     email: u.email,
     role: u.role,
     department: u.department,
+    clearanceLevel: u.clearanceLevel || "C2",
     isActive: u.isActive,
     emailConfirmed: u.emailConfirmed,
     createdAt: u.createdAt,
@@ -17,7 +18,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { fullName, email, role, department } = await req.json();
+    const { fullName, email, role, department, clearanceLevel } = await req.json();
     if (!fullName || !email) {
       return NextResponse.json({ message: "Nom et email requis" }, { status: 400 });
     }
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
       email,
       role: role || "EMPLOYEE",
       department: department || "General",
+      clearanceLevel: clearanceLevel || "C2",
     });
 
     return NextResponse.json(newUser, { status: 201 });

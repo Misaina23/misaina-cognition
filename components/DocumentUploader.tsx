@@ -4,14 +4,26 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useSignalR } from "@/lib/websocket";
 import { Button, Input } from "@/components/ui";
-import { UploadCloud, FileText, CheckCircle2, AlertCircle, X, Sparkles } from "lucide-react";
+import { MISSION_THEATERS, useMissionStore } from "@/lib/store";
+import { UploadCloud, FileText, CheckCircle2, AlertCircle, X, Sparkles, Globe } from "lucide-react";
 
-const CATEGORIES = ["Ressources Humaines", "R&D / Technique", "Sécurité & PSSI", "Organisation", "Général"];
+const CATEGORIES = [
+  "Normes Internationales",
+  "Sécurité Terrain",
+  "Sécurité & Conformité",
+  "Conformité Financière",
+  "Protection des Données",
+  "Éthique & Redevabilité",
+  "Général",
+];
 
 export function DocumentUploader() {
   const qc = useQueryClient();
+  const currentSelectedTheater = useMissionStore((s) => s.selectedTheater);
   const [file, setFile] = useState<File | null>(null);
-  const [category, setCategory] = useState("Ressources Humaines");
+  const [category, setCategory] = useState("Normes Internationales");
+  const [theater, setTheater] = useState(currentSelectedTheater === "TOUS" ? "Tous" : currentSelectedTheater);
+  const [classification, setClassification] = useState<"C1" | "C2" | "C3" | "C4">("C2");
   const [tags, setTags] = useState("");
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -20,35 +32,35 @@ export function DocumentUploader() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const signalRProgress = useSignalR();
-
   async function handleUpload() {
     if (!file || uploading) return;
 
     setUploading(true);
     setProgress(15);
-    setStatusMessage("Envoi du fichier au serveur...");
+    setStatusMessage("Transmission et validation du document...");
     setIsSuccess(false);
 
     try {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("category", category);
+      fd.append("classification", classification);
+      fd.append("theater", theater);
       if (tags) fd.append("tags", tags);
 
       setProgress(40);
-      setStatusMessage("Découpage sémantique (chunking)...");
+      setStatusMessage("Extraction du texte brut et chunking...");
 
       const { data } = await api.post("/documents/upload", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      setProgress(90);
-      setStatusMessage("Calcul des représentations vectorielles...");
+      setProgress(85);
+      setStatusMessage("Calcul des représentations vectorielles & BM25...");
 
       setTimeout(() => {
         setProgress(100);
-        setStatusMessage(`Document « ${data.title} » indexé avec succès.`);
+        setStatusMessage(`Document « ${data.title} » (${data.chunksCount || 2} chunks) indexé avec succès.`);
         setIsSuccess(true);
         setUploading(false);
         setFile(null);
@@ -56,7 +68,7 @@ export function DocumentUploader() {
         qc.invalidateQueries({ queryKey: ["docs"] });
         qc.invalidateQueries({ queryKey: ["mine"] });
         qc.invalidateQueries({ queryKey: ["stats"] });
-      }, 600);
+      }, 500);
     } catch {
       setStatusMessage("Erreur lors de l'indexation du document.");
       setUploading(false);
@@ -76,10 +88,10 @@ export function DocumentUploader() {
     <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
       <div>
         <h3 className="font-semibold text-base text-foreground flex items-center gap-2">
-          <UploadCloud size={18} className="text-primary" /> Importer un document
+          <UploadCloud size={18} className="text-primary" /> Importer un document institutionnel
         </h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Formats acceptés : PDF, DOCX, XLSX, TXT, MD (jusqu&apos;à 25 Mo).
+          Formats acceptés : PDF, DOCX, XLSX, TXT, MD, JSON, CSV (jusqu&apos;à 25 Mo).
         </p>
       </div>
 
@@ -102,7 +114,7 @@ export function DocumentUploader() {
           ref={fileInputRef}
           type="file"
           className="hidden"
-          accept=".pdf,.docx,.xlsx,.pptx,.txt,.md"
+          accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.json,.csv"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
 
@@ -122,14 +134,14 @@ export function DocumentUploader() {
             <p className="text-sm font-medium text-foreground">
               Glissez-déposez votre document ici
             </p>
-            <p className="text-xs text-muted-foreground">ou cliquez pour parcourir vos fichiers</p>
+            <p className="text-xs text-muted-foreground">ou cliquez pour parcourir vos fichiers locaux</p>
           </div>
         )}
       </div>
 
       {/* Category selector */}
       <div className="space-y-1.5">
-        <label className="text-xs font-semibold text-muted-foreground">Catégorie</label>
+        <label className="text-xs font-semibold text-muted-foreground">Domaine / Catégorie</label>
         <div className="flex flex-wrap gap-1.5">
           {CATEGORIES.map((cat) => (
             <button
@@ -148,11 +160,56 @@ export function DocumentUploader() {
         </div>
       </div>
 
+      {/* Theater / Mission scope */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+          <Globe size={13} className="text-primary" /> Théâtre d&apos;application / Mission
+        </label>
+        <select
+          value={theater}
+          onChange={(e) => setTheater(e.target.value)}
+          className="w-full text-xs font-medium rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        >
+          <option value="Tous">Tous les théâtres & Siège (Global)</option>
+          {MISSION_THEATERS.filter((t) => t.id !== "TOUS").map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Classification PSSI selector */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-semibold text-muted-foreground">Habilitation de Sécurité PSSI</label>
+        <div className="grid grid-cols-4 gap-1.5 text-center">
+          {[
+            { id: "C1", label: "C1 Public" },
+            { id: "C2", label: "C2 Interne" },
+            { id: "C3", label: "C3 Confidentiel" },
+            { id: "C4", label: "C4 Secret" },
+          ].map((lvl) => (
+            <button
+              key={lvl.id}
+              type="button"
+              onClick={() => setClassification(lvl.id as any)}
+              className={`rounded-lg py-1.5 px-1 text-xs font-medium transition-colors ${
+                classification === lvl.id
+                  ? "bg-primary text-primary-foreground font-semibold"
+                  : "border border-border bg-background text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {lvl.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Tags input */}
       <div className="space-y-1.5">
-        <label className="text-xs font-semibold text-muted-foreground">Mots-clés / Tags</label>
+        <label className="text-xs font-semibold text-muted-foreground">Mots-clés / Indexation</label>
         <Input
-          placeholder="Ex: télétravail, sécurité, mutuelle (séparés par virgule)"
+          placeholder="Ex: sphere, wash, abris, pssi, usaid, echo (séparés par virgule)"
           value={tags}
           onChange={(e) => setTags(e.target.value)}
         />
