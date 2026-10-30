@@ -19,15 +19,20 @@ import {
   Globe,
   FileDiff,
   KeyRound,
+  Plus,
+  Compass,
 } from "lucide-react";
-import { useThemeStore } from "@/lib/store";
+import { useThemeStore, useChatStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth";
 
-const nav = [
-  { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
-  { href: "/chat", label: "Assistant IA", icon: MessageSquare },
+const mainNav = [
+  { href: "/chat", label: "Assistant IA & Dialogue", icon: MessageSquare },
   { href: "/documents", label: "Base documentaire", icon: FileText },
   { href: "/diff", label: "Comparateur de versions", icon: FileDiff },
+  { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+];
+
+const enterpriseNav = [
   { href: "/connectors", label: "Connecteurs SI", icon: Database },
   { href: "/audit", label: "Audit & PSSI", icon: ShieldCheck },
   { href: "/analytics", label: "Analytiques RAG", icon: BarChart3 },
@@ -42,11 +47,12 @@ export function Sidebar() {
   const theme = useThemeStore((s) => s.theme);
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
+  const resetChat = useChatStore((s) => s.reset);
 
   const isAdmin = user?.role === "ADMIN";
   const isManager = user?.role === "MANAGER" || isAdmin;
 
-  const visibleNav = nav.filter((n) => {
+  const visibleEnterpriseNav = enterpriseNav.filter((n) => {
     if (n.href === "/users") return isAdmin;
     if (n.href === "/analytics" || n.href === "/audit" || n.href === "/api-keys") return isManager;
     return true;
@@ -61,96 +67,165 @@ export function Sidebar() {
         .toUpperCase()
     : "MC";
 
+  function handleStartNewChat() {
+    resetChat();
+    if (path !== "/chat") {
+      router.push("/chat");
+    }
+  }
+
   return (
-    <aside className="flex h-screen w-64 flex-col border-r border-border bg-card/80 backdrop-blur-md p-4 transition-colors">
-      {/* Brand Zone */}
-      <div className="mb-6 flex items-center gap-3 px-2 pt-1">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20">
-          <Layers size={20} className="stroke-[2.2]" />
-        </div>
-        <div className="flex flex-col min-w-0">
-          <span className="font-bold text-base tracking-tight text-foreground truncate">
-            Misaina
-          </span>
-          <span className="text-[11px] font-medium text-muted-foreground tracking-wide uppercase">
-            Cognition RAG
-          </span>
-        </div>
+    <aside className="flex h-screen w-64 flex-col border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground transition-colors select-none">
+      {/* Brand Header */}
+      <div className="flex items-center justify-between px-2 pt-2 pb-3">
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm shadow-primary/20 transition-transform group-hover:scale-105">
+            <Sparkles size={16} className="stroke-[2.2]" />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="font-serif text-[15px] font-semibold tracking-tight text-foreground leading-tight">
+              Misaina Cognition
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground tracking-wider uppercase">
+              Style Claude · RAG
+            </span>
+          </div>
+        </Link>
       </div>
 
-      {/* Navigation Links */}
-      <div className="mb-2 px-2 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
-        Navigation
+      {/* Claude-style "Nouvelle discussion" Button */}
+      <div className="px-1 my-2">
+        <button
+          onClick={handleStartNewChat}
+          className="w-full flex items-center justify-between gap-2 rounded-xl border border-border/80 bg-background/80 hover:bg-background px-3.5 py-2.5 text-xs font-medium text-foreground shadow-xs transition-all duration-150 hover:border-primary/40 active:scale-[0.98]"
+        >
+          <div className="flex items-center gap-2">
+            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Plus size={13} className="stroke-[2.5]" />
+            </div>
+            <span className="font-medium">Nouvelle discussion</span>
+          </div>
+          <span className="text-[10px] font-mono text-muted-foreground/80 border border-border/60 rounded px-1.5 py-0.5">
+            RAG
+          </span>
+        </button>
       </div>
-      <nav className="flex-1 space-y-1">
-        {visibleNav.map((n) => {
-          const isActive = path === n.href;
-          return (
-            <Link
-              key={n.href}
-              href={n.href}
-              className={cn(
-                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150 select-none",
-                isActive
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <n.icon
-                size={18}
-                className={cn(
-                  "shrink-0 transition-transform group-hover:scale-105",
-                  isActive ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground"
-                )}
-              />
-              <span className="truncate">{n.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
+
+      {/* Navigation Content */}
+      <div className="flex-1 overflow-y-auto space-y-5 px-1 py-1">
+        {/* Main Section */}
+        <div>
+          <div className="px-2.5 mb-1.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+            Espaces de travail
+          </div>
+          <nav className="space-y-0.5">
+            {mainNav.map((n) => {
+              const isActive = path === n.href;
+              return (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  className={cn(
+                    "group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-all duration-150",
+                    isActive
+                      ? "bg-background text-foreground shadow-xs border border-border/70 font-semibold"
+                      : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                  )}
+                >
+                  <n.icon
+                    size={16}
+                    className={cn(
+                      "shrink-0 transition-colors",
+                      isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                    )}
+                  />
+                  <span className="truncate">{n.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Enterprise Governance Section */}
+        {visibleEnterpriseNav.length > 0 && (
+          <div>
+            <div className="px-2.5 mb-1.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+              Gouvernance & Sécurité
+            </div>
+            <nav className="space-y-0.5">
+              {visibleEnterpriseNav.map((n) => {
+                const isActive = path === n.href;
+                return (
+                  <Link
+                    key={n.href}
+                    href={n.href}
+                    className={cn(
+                      "group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-all duration-150",
+                      isActive
+                        ? "bg-background text-foreground shadow-xs border border-border/70 font-semibold"
+                        : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                    )}
+                  >
+                    <n.icon
+                      size={16}
+                      className={cn(
+                        "shrink-0 transition-colors",
+                        isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                      )}
+                    />
+                    <span className="truncate">{n.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+        )}
+      </div>
 
       {/* Public Showcase Link */}
-      <div className="py-2 border-t border-border/70">
+      <div className="py-2 border-t border-border/60 px-1">
         <Link
           href="/"
-          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-muted-foreground hover:bg-background/60 hover:text-foreground transition-colors"
         >
-          <Globe size={15} />
-          <span>Site vitrine public</span>
+          <Compass size={15} />
+          <span>Portail institutionnel public</span>
         </Link>
       </div>
 
       {/* User Information & Quick Utilities */}
-      <div className="mt-auto border-t border-border pt-3 space-y-2">
+      <div className="mt-auto border-t border-border/70 pt-2.5 px-1 space-y-2">
         <Link
           href="/profile"
           className={cn(
-            "flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-muted",
-            path === "/profile" && "bg-muted"
+            "flex items-center gap-2.5 rounded-xl p-2 transition-colors hover:bg-background/80 border border-transparent hover:border-border/60",
+            path === "/profile" && "bg-background border-border/70 shadow-xs"
           )}
         >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary font-bold text-xs">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary font-serif font-bold text-xs">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-foreground truncate">{user?.fullName || "Utilisateur"}</p>
-            <p className="text-[11px] text-muted-foreground truncate">{user?.department || "Misaina Entreprise"}</p>
+            <p className="text-xs font-semibold text-foreground truncate">{user?.fullName || "Collaborateur"}</p>
+            <p className="text-[10px] text-muted-foreground truncate font-mono">
+              {user?.department || "Misaina Org"} · {user?.clearanceLevel || "C2"}
+            </p>
           </div>
           {isAdmin && (
-            <span title="Administrateur">
-              <Shield size={14} className="text-primary shrink-0" />
+            <span title="Administrateur habilité">
+              <Shield size={13} className="text-primary shrink-0" />
             </span>
           )}
         </Link>
 
-        <div className="flex items-center gap-1.5 pt-1">
+        <div className="flex items-center gap-1.5 pt-0.5">
           <button
             onClick={toggle}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-background py-1.5 px-2 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border/70 bg-background/70 py-1.5 px-2 text-xs font-medium text-foreground hover:bg-background transition-colors"
             title="Basculer le thème"
           >
-            {theme === "dark" ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-400" />}
-            <span className="text-[11px]">{theme === "dark" ? "Clair" : "Sombre"}</span>
+            {theme === "dark" ? <Sun size={13} className="text-primary" /> : <Moon size={13} className="text-muted-foreground" />}
+            <span className="text-[11px]">{theme === "dark" ? "Ambiance Claire" : "Ambiance Sombre"}</span>
           </button>
 
           <button
@@ -158,10 +233,10 @@ export function Sidebar() {
               logout();
               router.push("/login");
             }}
-            className="flex items-center justify-center rounded-lg border border-border bg-background p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 hover:border-red-500/20 transition-colors"
-            title="Se déconnecter"
+            className="flex items-center justify-center rounded-lg border border-border/70 bg-background/70 p-1.5 text-muted-foreground hover:text-red-600 hover:bg-red-500/10 hover:border-red-500/20 transition-colors"
+            title="Déconnexion"
           >
-            <LogOut size={16} />
+            <LogOut size={15} />
           </button>
         </div>
       </div>

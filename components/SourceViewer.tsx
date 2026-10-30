@@ -26,35 +26,37 @@ export function SourceViewer({ sources }: { sources: Source[] }) {
   return (
     <div className="mt-4 border-t border-border/70 pt-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase flex items-center gap-1.5">
-          <FileText size={13} className="text-primary" /> Sources citées ({sources.length})
+        <span className="text-[11px] font-mono tracking-wider text-muted-foreground uppercase flex items-center gap-1.5">
+          <FileText size={12} className="text-primary" /> Sources institutionnelles citées ({sources.length})
         </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-1.5">
+      <div className="space-y-1.5">
         {sources.map((s, i) => {
           const isSelected = expanded === i;
           return (
             <div
               key={i}
-              className="rounded-lg border border-border bg-card/60 p-2.5 transition-colors hover:border-primary/40"
+              className="rounded-xl border border-border/70 bg-card p-3 transition-colors hover:border-primary/40 shadow-2xs"
             >
               <div
                 className="flex items-center justify-between cursor-pointer select-none"
                 onClick={() => setExpanded(isSelected ? null : i)}
               >
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
-                  <FileText size={14} className="text-primary shrink-0" />
-                  <span className="text-xs font-semibold text-foreground truncate">
+                  <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 text-primary shrink-0">
+                    <FileText size={12} />
+                  </div>
+                  <span className="text-xs font-serif font-semibold text-foreground truncate">
                     {s.documentTitle}
                   </span>
                   {s.pageNumber !== undefined && (
                     <span className="text-[11px] text-muted-foreground shrink-0 font-mono">
-                      · p. {s.pageNumber}
+                      · Page {s.pageNumber}
                     </span>
                   )}
-                  <span className="text-[11px] text-primary/80 font-mono">
-                    · {getClassificationLabel(s.classification)}
+                  <span className="text-[10px] text-primary font-mono border border-primary/20 rounded px-1.5 py-0.2 bg-primary/5">
+                    {getClassificationLabel(s.classification)}
                   </span>
                 </div>
                 <div className="text-muted-foreground p-0.5">
@@ -65,7 +67,7 @@ export function SourceViewer({ sources }: { sources: Source[] }) {
               {isSelected && (
                 <div className="mt-2.5 space-y-2 border-t border-border/60 pt-2 text-xs">
                   {s.excerpt && (
-                    <div className="rounded-md bg-muted/70 p-2.5 text-xs text-foreground/90 font-mono leading-relaxed border-l-2 border-primary">
+                    <div className="rounded-lg bg-secondary/40 p-3 text-xs text-foreground/90 font-sans leading-relaxed border-l-2 border-primary italic">
                       « {s.excerpt} »
                     </div>
                   )}
@@ -73,15 +75,15 @@ export function SourceViewer({ sources }: { sources: Source[] }) {
                   {/* Explainability Breakdown */}
                   {(s.bm25Score !== undefined || s.vectorScore !== undefined || s.rrfScore !== undefined) && (
                     <div className="grid grid-cols-3 gap-2 pt-1 font-mono text-[11px] text-muted-foreground">
-                      <div className="rounded-md bg-muted/40 p-1.5">
+                      <div className="rounded-lg border border-border/50 bg-background/60 p-2">
                         <span className="block text-[10px] uppercase text-muted-foreground">Score BM25</span>
                         <span className="font-semibold text-foreground">{s.bm25Score ?? 0.91}</span>
                       </div>
-                      <div className="rounded-md bg-muted/40 p-1.5">
+                      <div className="rounded-lg border border-border/50 bg-background/60 p-2">
                         <span className="block text-[10px] uppercase text-muted-foreground">Similarité Vecteur</span>
                         <span className="font-semibold text-foreground">{s.vectorScore ?? 0.94}</span>
                       </div>
-                      <div className="rounded-md bg-muted/40 p-1.5">
+                      <div className="rounded-lg border border-border/50 bg-background/60 p-2">
                         <span className="block text-[10px] uppercase text-muted-foreground">Rang RRF</span>
                         <span className="font-semibold text-emerald-600 dark:text-emerald-400">{s.rrfScore ?? 0.93}</span>
                       </div>

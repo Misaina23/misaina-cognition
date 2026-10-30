@@ -83,10 +83,10 @@ export default function LandingPage() {
       <header className="sticky top-0 z-50 flex items-center justify-between gap-8 border-b border-border bg-background/90 px-6 py-4 backdrop-blur-md">
         {/* Zone 1: Single text element wordmark */}
         <Link href="/" className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20">
-            <Layers size={18} className="stroke-[2.2]" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm shadow-primary/20">
+            <Sparkles size={18} className="stroke-[2.2]" />
           </div>
-          <span className="text-base font-bold tracking-tight text-foreground">
+          <span className="font-serif text-lg font-semibold tracking-tight text-foreground">
             Misaina Cognition
           </span>
         </Link>
@@ -127,16 +127,16 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
             {/* Left Column: Proposition */}
             <div className="lg:col-span-7 space-y-6">
-              <div className="flex items-center gap-2 text-xs font-semibold text-primary uppercase tracking-wider">
+              <div className="flex items-center gap-2 text-xs font-mono font-medium text-primary uppercase tracking-wider">
                 <ShieldCheck size={16} />
-                <span>Plateforme Souveraine d&apos;Intelligence Documentaire d&apos;Entreprise</span>
+                <span>Plateforme Souveraine d&apos;Intelligence Documentaire</span>
               </div>
 
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-foreground leading-[1.15] text-balance">
+              <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight text-foreground leading-[1.18] text-balance">
                 Le Moteur de Connaissance Souverain Dédié aux Grandes Organisations
               </h1>
 
-              <p className="text-base sm:text-lg text-muted-foreground leading-relaxed max-w-2xl text-balance">
+              <p className="text-base sm:text-lg text-muted-foreground leading-relaxed max-w-2xl text-balance font-sans">
                 Fédérez les silos documentaires de votre groupe dans un pipeline certifié BM25 et vecteurs denses. Bénéficiez d&apos;une traçabilité cryptographique des citations et d&apos;une isolation multitenant conforme SecNumCloud et PSSI.
               </p>
 

@@ -14,10 +14,10 @@ export function DashboardCard({
   icon?: React.ComponentType<{ size?: number; className?: string }>;
 }) {
   return (
-    <Card className="relative overflow-hidden p-5 transition-all hover:border-primary/40 hover:shadow-md">
+    <Card className="relative overflow-hidden p-5 transition-all hover:border-primary/40 hover:shadow-2xs border-border/80 bg-card">
       <div className="flex items-start justify-between">
         <div className="space-y-1">
-          <p className="text-xs font-medium text-muted-foreground">{title}</p>
+          <p className="text-xs font-serif font-medium text-muted-foreground">{title}</p>
           <p className="text-3xl font-bold tracking-tight text-foreground tabular-nums font-mono">
             {value}
           </p>
@@ -30,8 +30,8 @@ export function DashboardCard({
           )}
         </div>
         {Icon && (
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Icon size={22} className="stroke-[2]" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Icon size={20} className="stroke-[2.2]" />
           </div>
         )}
       </div>

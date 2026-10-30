@@ -46,37 +46,50 @@ export function TopHeader() {
 
   return (
     <>
-      <header className="hidden md:flex items-center justify-between border-b border-border bg-card/60 backdrop-blur-md px-6 py-2.5 z-20">
-        {/* Left: Mission / Operational Theater Selector */}
+      <header className="hidden md:flex items-center justify-between border-b border-border/70 bg-background/80 backdrop-blur-md px-6 py-2.5 z-20 transition-colors">
+        {/* Left: Claude-style Model & Engine Indicator */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-            <Globe size={15} className="text-primary" />
-            <span className="uppercase tracking-wider">Théâtre d&apos;Opération :</span>
+          <div className="flex items-center gap-2 rounded-full border border-border/80 bg-card/80 px-3 py-1 shadow-2xs">
+            <div className="flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <Sparkles size={11} className="stroke-[2.5]" />
+            </div>
+            <span className="font-serif text-xs font-semibold text-foreground tracking-tight">
+              Misaina Cognition
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground border-l border-border/80 pl-2">
+              Gemini 3.8 Flash · RAG
+            </span>
           </div>
 
-          <div className="relative">
-            <select
-              value={selectedTheater}
-              onChange={(e) => setTheater(e.target.value)}
-              className="text-xs font-medium rounded-lg border border-border bg-background px-3 py-1.5 text-foreground hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary transition-colors cursor-pointer"
-            >
-              {MISSION_THEATERS.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label} ({t.badge})
-                </option>
-              ))}
-            </select>
+          {/* Operational Theater Selector */}
+          <div className="flex items-center gap-2 pl-2">
+            <span className="text-[11px] font-medium text-muted-foreground hidden lg:inline">Théâtre :</span>
+            <div className="relative">
+              <select
+                value={selectedTheater}
+                onChange={(e) => setTheater(e.target.value)}
+                className="text-xs font-medium rounded-lg border border-border/80 bg-card/60 px-2.5 py-1 text-foreground hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary transition-colors cursor-pointer"
+              >
+                {MISSION_THEATERS.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label} ({t.badge})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <span className="hidden xl:inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-[10px] font-semibold text-secondary-foreground font-mono">
+              {currentTheaterObj.badge}
+            </span>
           </div>
-
-          <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-            {currentTheaterObj.badge}
-          </span>
         </div>
 
         {/* Right: Security Clearance & System Health Status */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           {/* User clearance badge */}
-          <div className="flex items-center gap-1.5 text-xs font-mono rounded-lg border border-border bg-background px-2.5 py-1 text-muted-foreground" title="Habilitation de sécurité de votre session">
+          <div
+            className="flex items-center gap-1.5 text-xs font-mono rounded-lg border border-border/80 bg-card/60 px-2.5 py-1 text-muted-foreground"
+            title="Habilitation de sécurité de votre session"
+          >
             <Lock size={12} className="text-primary" />
             <span className="font-semibold text-foreground">{user?.clearanceLevel || "C2"}</span>
             <span className="text-[10px] text-muted-foreground">PSSI</span>
@@ -88,14 +101,14 @@ export function TopHeader() {
               fetchHealth();
               setHealthOpen(true);
             }}
-            className="group flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 transition-colors"
+            className="group flex items-center gap-2 rounded-lg border border-border/80 bg-card/60 hover:bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-all shadow-2xs hover:border-border"
             title="Inspecter le diagnostic système et l'état du pipeline RAG"
           >
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
             </span>
-            <span className="font-mono text-[11px] font-semibold">RAG OPÉRATIONNEL</span>
+            <span className="font-mono text-[11px] text-muted-foreground group-hover:text-foreground">Système RAG</span>
             <Activity size={12} className="text-emerald-500 group-hover:scale-110 transition-transform" />
           </button>
         </div>
