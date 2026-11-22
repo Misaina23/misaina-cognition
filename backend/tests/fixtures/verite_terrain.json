@@ -1,0 +1,166 @@
+{
+  "totalRows": 150,
+  "totalErrors": 20,
+  "errors": [
+    {
+      "externalId": "BEN-131",
+      "rowNumber": 131,
+      "errorType": "exact_duplicate",
+      "expectedCategory": "exact_duplicate",
+      "expectedRouting": "auto_action",
+      "description": "Doublon exact de BEN-001 (Aminata M001 Diallo) avec téléphone formaté différemment."
+    },
+    {
+      "externalId": "BEN-132",
+      "rowNumber": 132,
+      "errorType": "exact_duplicate",
+      "expectedCategory": "exact_duplicate",
+      "expectedRouting": "auto_action",
+      "description": "Doublon exact de BEN-002 (Moussa M002 Diallo) avec téléphone formaté différemment."
+    },
+    {
+      "externalId": "BEN-133",
+      "rowNumber": 133,
+      "errorType": "exact_duplicate",
+      "expectedCategory": "exact_duplicate",
+      "expectedRouting": "auto_action",
+      "description": "Doublon exact de BEN-003 (Fatou M003 Diallo) avec téléphone formaté différemment."
+    },
+    {
+      "externalId": "BEN-134",
+      "rowNumber": 134,
+      "errorType": "exact_duplicate",
+      "expectedCategory": "exact_duplicate",
+      "expectedRouting": "auto_action",
+      "description": "Doublon exact de BEN-004 (Ibrahima M004 Diallo) avec téléphone formaté différemment."
+    },
+    {
+      "externalId": "BEN-135",
+      "rowNumber": 135,
+      "errorType": "near_duplicate",
+      "expectedCategory": "near_duplicate",
+      "expectedRouting": "human_validation",
+      "description": "Quasi-doublon ambigu de BEN-011 (faute de frappe sur le nom + 1 chiffre différent sur le téléphone)."
+    },
+    {
+      "externalId": "BEN-136",
+      "rowNumber": 136,
+      "errorType": "near_duplicate",
+      "expectedCategory": "near_duplicate",
+      "expectedRouting": "human_validation",
+      "description": "Quasi-doublon ambigu de BEN-012 (faute de frappe sur le nom + 1 chiffre différent sur le téléphone)."
+    },
+    {
+      "externalId": "BEN-137",
+      "rowNumber": 137,
+      "errorType": "near_duplicate",
+      "expectedCategory": "near_duplicate",
+      "expectedRouting": "human_validation",
+      "description": "Quasi-doublon ambigu de BEN-013 (faute de frappe sur le nom + 1 chiffre différent sur le téléphone)."
+    },
+    {
+      "externalId": "BEN-138",
+      "rowNumber": 138,
+      "errorType": "near_duplicate",
+      "expectedCategory": "near_duplicate",
+      "expectedRouting": "human_validation",
+      "description": "Quasi-doublon ambigu de BEN-014 (faute de frappe sur le nom + 1 chiffre différent sur le téléphone)."
+    },
+    {
+      "externalId": "BEN-139",
+      "rowNumber": 139,
+      "errorType": "aberrant_age",
+      "expectedCategory": "outlier",
+      "expectedRouting": "human_validation",
+      "description": "Âge aberrant injecté (-5 ans)."
+    },
+    {
+      "externalId": "BEN-140",
+      "rowNumber": 140,
+      "errorType": "aberrant_age",
+      "expectedCategory": "outlier",
+      "expectedRouting": "human_validation",
+      "description": "Âge aberrant injecté (148 ans)."
+    },
+    {
+      "externalId": "BEN-141",
+      "rowNumber": 141,
+      "errorType": "aberrant_age",
+      "expectedCategory": "outlier",
+      "expectedRouting": "human_validation",
+      "description": "Âge aberrant injecté (212 ans)."
+    },
+    {
+      "externalId": "BEN-142",
+      "rowNumber": 142,
+      "errorType": "aberrant_age",
+      "expectedCategory": "outlier",
+      "expectedRouting": "human_validation",
+      "description": "Âge aberrant injecté (999 ans)."
+    },
+    {
+      "externalId": "BEN-143",
+      "rowNumber": 143,
+      "errorType": "missing_required",
+      "expectedCategory": "missing_required",
+      "expectedRouting": "human_validation",
+      "description": "Champ obligatoire fullName vide."
+    },
+    {
+      "externalId": "BEN-144",
+      "rowNumber": 144,
+      "errorType": "missing_required",
+      "expectedCategory": "missing_required",
+      "expectedRouting": "human_validation",
+      "description": "Champ obligatoire fullName vide."
+    },
+    {
+      "externalId": "BEN-145",
+      "rowNumber": 145,
+      "errorType": "missing_required",
+      "expectedCategory": "missing_required",
+      "expectedRouting": "human_validation",
+      "description": "Champ obligatoire zone vide."
+    },
+    {
+      "externalId": "BEN-146",
+      "rowNumber": 146,
+      "errorType": "missing_required",
+      "expectedCategory": "missing_required",
+      "expectedRouting": "human_validation",
+      "description": "Champ obligatoire zone vide."
+    },
+    {
+      "externalId": "BEN-147",
+      "rowNumber": 147,
+      "errorType": "geo_out_of_bounds",
+      "expectedCategory": "geo_out_of_bounds",
+      "expectedRouting": "human_validation",
+      "description": "Coordonnées GPS à Paris (hors zone d'intervention globale)."
+    },
+    {
+      "externalId": "BEN-148",
+      "rowNumber": 148,
+      "errorType": "geo_out_of_bounds",
+      "expectedCategory": "geo_out_of_bounds",
+      "expectedRouting": "human_validation",
+      "description": "Coordonnées nulles (0, 0) invalides."
+    },
+    {
+      "externalId": "BEN-149",
+      "rowNumber": 149,
+      "errorType": "geo_zone_mismatch",
+      "expectedCategory": "geo_out_of_bounds",
+      "expectedRouting": "human_validation",
+      "description": "Coordonnées GPS à Saint-Louis alors que la zone d'intervention déclarée est Dakar."
+    },
+    {
+      "externalId": "BEN-150",
+      "rowNumber": 150,
+      "errorType": "geo_zone_mismatch",
+      "expectedCategory": "geo_out_of_bounds",
+      "expectedRouting": "human_validation",
+      "description": "Coordonnées GPS à Kaolack alors que la zone d'intervention déclarée est Ziguinchor."
+    }
+  ]
+}

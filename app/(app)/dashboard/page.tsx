@@ -15,6 +15,7 @@ import {
   Upload,
   CheckCircle2,
   FileCheck,
+  ShieldAlert,
 } from "lucide-react";
 import {
   BarChart,
@@ -85,10 +86,15 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link href="/chat">
             <Button className="shadow-sm">
               <Sparkles size={16} /> Poser une question
+            </Button>
+          </Link>
+          <Link href="/guardian">
+            <Button variant="secondary">
+              <ShieldAlert size={16} /> Gardien de données
             </Button>
           </Link>
           <Link href="/documents">

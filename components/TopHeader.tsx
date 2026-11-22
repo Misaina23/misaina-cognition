@@ -14,6 +14,7 @@ import {
   Lock,
   RefreshCw,
   SlidersHorizontal,
+  Sparkles,
 } from "lucide-react";
 
 export function TopHeader() {

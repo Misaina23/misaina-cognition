@@ -2,12 +2,16 @@ import { create } from "zustand";
 
 interface ChatStore {
   conversationId: string | null;
+  resetCounter: number;
   setConversation: (id: string | null) => void;
+  reset: () => void;
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
   conversationId: null,
+  resetCounter: 0,
   setConversation: (conversationId) => set({ conversationId }),
+  reset: () => set((state) => ({ conversationId: null, resetCounter: state.resetCounter + 1 })),
 }));
 
 export const MISSION_THEATERS = [
@@ -27,6 +31,20 @@ interface MissionStore {
 export const useMissionStore = create<MissionStore>((set) => ({
   selectedTheater: "TOUS",
   setTheater: (theater) => set({ selectedTheater: theater }),
+}));
+
+interface SpaceStore {
+  selectedSpaceId: string | null;
+  setSpaceId: (spaceId: string | null) => void;
+}
+
+/**
+ * Store client conservant l'identifiant d'espace sélectionné par l'utilisateur.
+ * L'isolation multitenant reste systématiquement vérifiée côté serveur.
+ */
+export const useSpaceStore = create<SpaceStore>((set) => ({
+  selectedSpaceId: null,
+  setSpaceId: (selectedSpaceId) => set({ selectedSpaceId }),
 }));
 
 interface ThemeStore {

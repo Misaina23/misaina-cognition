@@ -21,6 +21,7 @@ import {
   KeyRound,
   Plus,
   Compass,
+  ShieldAlert,
 } from "lucide-react";
 import { useThemeStore, useChatStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth";
@@ -29,6 +30,7 @@ const mainNav = [
   { href: "/chat", label: "Assistant IA & Dialogue", icon: MessageSquare },
   { href: "/documents", label: "Base documentaire", icon: FileText },
   { href: "/diff", label: "Comparateur de versions", icon: FileDiff },
+  { href: "/guardian", label: "Gardien de données", icon: ShieldAlert },
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
 ];
 

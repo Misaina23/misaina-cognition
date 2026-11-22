@@ -1,3 +1,14 @@
+import type {
+  UserSpace,
+  DataSourceConfig,
+  RawRecord,
+  NormalizedRecord,
+  DataRun,
+  Anomaly,
+  ValidationItem,
+  AgentAction,
+} from "../guardian/types";
+
 export type ClearanceLevel = "C1" | "C2" | "C3" | "C4";
 
 export interface UserRecord {
@@ -739,6 +750,100 @@ class MockDatabase {
   generatedDocs: GeneratedDocRecord[] = [];
   resetTokens: Map<string, string> = new Map();
   subscribers: Set<(data: string) => void> = new Set();
+
+  // --- Collections Gardien de Données (isolées par tenantId + spaceId) ---
+  userSpaces: UserSpace[] = [
+    {
+      id: "space-u1-global",
+      tenantId: "tenant-direction-executive-conseil",
+      name: "Suivi Bénéficiaires — Siège",
+      description: "Espace principal de qualité des données du siège",
+      ownerUserId: "u-1",
+      memberUserIds: ["u-1"],
+      createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+    },
+    {
+      id: "space-u1-audit",
+      tenantId: "tenant-direction-executive-conseil",
+      name: "Contrôle Enquêtes Terrain",
+      description: "Espace secondaire d'audit des collectes CSV / Kobo",
+      ownerUserId: "u-1",
+      memberUserIds: ["u-1"],
+      createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+    },
+    {
+      id: "space-u2-sec",
+      tenantId: "tenant-securite-conformite-numerique",
+      name: "Conformité & Incidents CISO",
+      description: "Espace dédié à l'hygiène des journaux et actifs",
+      ownerUserId: "u-2",
+      memberUserIds: ["u-2"],
+      createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+    },
+    {
+      id: "space-u3-sahel",
+      tenantId: "tenant-operations-terrain-urgence",
+      name: "Mission Sahel — Dakar (CommCare / Kobo)",
+      description: "Collecte bénéficiaires WASH et nutrition terrain",
+      ownerUserId: "u-3",
+      memberUserIds: ["u-3"],
+      createdAt: new Date(Date.now() - 6 * 86400000).toISOString(),
+    },
+    {
+      id: "space-u4-fin",
+      tenantId: "tenant-finance-bailleurs-internationaux",
+      name: "Registre Fournisseurs & Subventions",
+      description: "Contrôle des doublons et montants bailleurs",
+      ownerUserId: "u-4",
+      memberUserIds: ["u-4"],
+      createdAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+    },
+  ];
+
+  guardianSources: DataSourceConfig[] = [
+    {
+      id: "src-u1-csv",
+      tenantId: "tenant-direction-executive-conseil",
+      spaceId: "space-u1-global",
+      name: "Import CSV / Excel Bénéficiaires",
+      type: "csv",
+      status: "ACTIVE",
+      recordsCount: 0,
+      createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+    },
+    {
+      id: "src-u1-commcare",
+      tenantId: "tenant-direction-executive-conseil",
+      spaceId: "space-u1-global",
+      name: "CommCare HQ — Formulaire Enregistrement",
+      type: "commcare",
+      status: "ACTIVE",
+      recordsCount: 0,
+      createdAt: new Date(Date.now() - 9 * 86400000).toISOString(),
+    },
+    {
+      id: "src-u1-kobo",
+      tenantId: "tenant-direction-executive-conseil",
+      spaceId: "space-u1-global",
+      name: "KoboToolbox / ODK — Collecte Terrain",
+      type: "generic",
+      format: "kobo",
+      recordsPath: "results",
+      externalIdField: "_id",
+      geoField: "_geolocation",
+      status: "ACTIVE",
+      recordsCount: 0,
+      createdAt: new Date(Date.now() - 8 * 86400000).toISOString(),
+    },
+  ];
+
+  rawRecords: RawRecord[] = [];
+  normalizedRecords: NormalizedRecord[] = [];
+  dataRuns: DataRun[] = [];
+  anomalies: Anomaly[] = [];
+  validationQueue: ValidationItem[] = [];
+  agentActions: AgentAction[] = [];
+  projectRulesYaml: Map<string, string> = new Map();
 
   broadcastEvent(event: { type: string; documentId?: string; percent?: number; message?: string }) {
     const payload = JSON.stringify(event);

@@ -59,7 +59,14 @@ export async function POST(req: NextRequest) {
     // 2. Real server-side Gemini 3.8 Flash generation if GEMINI_API_KEY is configured
     if (process.env.GEMINI_API_KEY && matched.length > 0) {
       try {
-        const ai = new GoogleGenAI();
+        const ai = new GoogleGenAI({
+          apiKey: process.env.GEMINI_API_KEY,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
+            },
+          },
+        });
         const contextBlocks = matched
           .map(
             (m, i) =>
@@ -91,9 +98,6 @@ DIRECTIVES DE RÉPONSE :
         const response = await ai.models.generateContent({
           model: "gemini-3.8-flash",
           contents: prompt,
-          config: {
-            temperature: 0.2,
-          },
         });
 
         if (response.text && response.text.trim()) {

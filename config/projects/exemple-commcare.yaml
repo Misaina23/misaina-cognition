@@ -1,0 +1,66 @@
+version: 1
+projectName: "Suivi Santé Communautaire CommCare"
+requiredFields:
+  - field: fullName
+    severity: bloquante
+    label: "Nom du patient / ménage"
+  - field: zone
+    severity: bloquante
+    label: "District sanitaire d'intervention"
+  - field: phone
+    severity: a_verifier
+    label: "Numéro de suivi"
+ranges:
+  age:
+    min: 0
+    max: 105
+    severity: bloquante
+  amount:
+    min: 0
+    max: 15000
+    severity: a_verifier
+  recordedAt:
+    minYear: 2020
+    allowFutureDays: 0
+    severity: a_verifier
+geoBounds:
+  enabled: true
+  zoneName: "Corridor Sahel"
+  minLat: 10.0
+  maxLat: 20.5
+  minLon: -17.6
+  maxLon: 4.5
+  rejectZeroZero: true
+  severity: bloquante
+  mismatchSeverity: a_verifier
+  interventionZones:
+    - name: "Dakar"
+      minLat: 14.55
+      maxLat: 14.88
+      minLon: -17.55
+      maxLon: -17.15
+    - name: "Sahel"
+      minLat: 12.0
+      maxLat: 17.5
+      minLon: -12.0
+      maxLon: 4.0
+    - name: "Bamako"
+      minLat: 12.50
+      maxLat: 12.78
+      minLon: -8.12
+      maxLon: -7.85
+duplicateDetection:
+  exactBusinessKeyFields:
+    - fullName
+    - phone
+  exactSeverity: bloquante
+  nearDuplicate:
+    enabled: true
+    autoMergeThreshold: 0.94
+    reviewThreshold: 0.80
+    severity: a_verifier
+guardrails:
+  maxAbnormalAnomalyRatio: 0.40
+  maxActionsPerRun: 50
+  maxTokensPerRun: 16000
+  minAgentConfidence: 0.70

@@ -1,0 +1,31 @@
+{
+  "name": "gardien-donnees-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/server.js",
+    "evaluate": "node dist/tests/evaluate.js",
+    "test:idempotence": "node dist/tests/idempotence.test.js",
+    "test:isolation": "node dist/tests/isolation.test.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.32.0",
+    "chokidar": "^4.0.3",
+    "exceljs": "^4.4.0",
+    "js-yaml": "^4.1.0",
+    "jschardet": "^3.1.4",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16",
+    "papaparse": "^5.4.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.2",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^6.4.17",
+    "@types/papaparse": "^5.3.15",
+    "typescript": "^5.7.2"
+  }
+}

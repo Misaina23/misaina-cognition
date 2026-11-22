@@ -75,9 +75,17 @@ export function ChatInterface() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const conversationId = useChatStore((s) => s.conversationId);
+  const resetCounter = useChatStore((s) => s.resetCounter);
   const setConversation = useChatStore((s) => s.setConversation);
   const selectedTheater = useMissionStore((s) => s.selectedTheater);
   const user = useAuthStore((s) => s.user);
+
+  useEffect(() => {
+    if (resetCounter > 0) {
+      setMessages([]);
+      setInput("");
+    }
+  }, [resetCounter]);
 
   // Auto-scroll on new message
   useEffect(() => {
@@ -186,7 +194,12 @@ export function ChatInterface() {
         answer: lastAi.content,
         sources: lastAi.sources ?? [],
       });
-      window.open(`/api/chat/download/${data.id}`, "_blank");
+      const link = document.createElement("a");
+      link.href = `/api/chat/download/${data.id}`;
+      link.download = data.fileName || `Misaina_Cognition_${data.id}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch {
       // handled
     } finally {

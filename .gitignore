@@ -6,3 +6,14 @@ bin/
 obj/
 .vs/
 .idea/
+data/inbox/
+data/archive/
+data/quarantine/
+backend/data/inbox/*
+!backend/data/inbox/.gitkeep
+backend/data/archive/*
+!backend/data/archive/.gitkeep
+backend/data/quarantine/*
+!backend/data/quarantine/.gitkeep
+backend/dist/
+frontend/.next/
