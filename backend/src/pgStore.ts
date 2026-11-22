@@ -12,7 +12,6 @@ import type {
   UserSpace,
   ValidationItem,
 } from "./connectors/types";
-import type { AuthPrincipal, Permission } from "./tenant";
 
 let pgPool: Pool | undefined;
 let pgReadyPromise: Promise<boolean> | undefined;
@@ -294,18 +293,63 @@ ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
-CREATE TABLE IF NOT EXISTS guardian_users (
+CREATE TABLE IF NOT EXISTS knowledge_documents (
   id TEXT PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
-  full_name TEXT NOT NULL,
-  role TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  space_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  file_name TEXT NOT NULL,
   department TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
-  permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
-  password_hash TEXT NOT NULL,
+  classification TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  document_hash TEXT NOT NULL,
+  merkle_root TEXT NOT NULL,
+  uploaded_by TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  validated_by TEXT,
-  validated_at TEXT
+  chunks JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+CREATE TABLE IF NOT EXISTS knowledge_queries (
+  query_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  space_id TEXT NOT NULL,
+  query_hash TEXT NOT NULL,
+  merkle_proof_root TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  citations JSONB NOT NULL DEFAULT '[]'::jsonb,
+  confidence DOUBLE PRECISION NOT NULL,
+  bm25_latency_ms INTEGER NOT NULL DEFAULT 0,
+  vector_latency_ms INTEGER NOT NULL DEFAULT 0,
+  total_latency_ms INTEGER NOT NULL DEFAULT 0,
+  llm_provider TEXT NOT NULL,
+  llm_model TEXT NOT NULL,
+  llm_fallback_reason TEXT,
+  clearance_applied TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS knowledge_audit_ledger (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  space_id TEXT NOT NULL,
+  actor_email TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  action TEXT NOT NULL,
+  classification TEXT NOT NULL,
+  resource_summary TEXT NOT NULL,
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  prev_event_hash TEXT NOT NULL,
+  event_hash TEXT NOT NULL,
+  timestamp TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS enterprise_leads (
+  id TEXT PRIMARY KEY,
+  organization TEXT NOT NULL,
+  contact_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  employee_count TEXT NOT NULL,
+  deployment_mode TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 `;
 
@@ -327,7 +371,6 @@ export async function flushPgQueue(): Promise<void> {
 export async function initAndHydrateFromPg(seedDefaults: {
   spaces: UserSpace[];
   sources: DataSourceConfig[];
-  users?: Array<{ user: AuthPrincipal; passwordHash: string }>;
 }) {
   if (!isPgEnabled()) return null;
   const pool = getPgPool();
@@ -343,11 +386,6 @@ export async function initAndHydrateFromPg(seedDefaults: {
         for (const s of seedDefaults.spaces) await upsertSpacePg(pool, s);
         for (const src of seedDefaults.sources) await upsertSourcePg(pool, src);
       }
-      if (Array.isArray(seedDefaults.users)) {
-        for (const item of seedDefaults.users) {
-          await insertSeedUserIfMissingPg(pool, item.user, item.passwordHash);
-        }
-      }
       return true;
     })().catch((err) => {
       pgReadyPromise = undefined;
@@ -360,7 +398,7 @@ export async function initAndHydrateFromPg(seedDefaults: {
   if (!ok) return null;
   await flushPgQueue();
 
-  const [spacesRes, sourcesRes, rawRes, normRes, rulesRes, runsRes, anomRes, valRes, actRes, fbRes, usersRes] =
+  const [spacesRes, sourcesRes, rawRes, normRes, rulesRes, runsRes, anomRes, valRes, actRes, fbRes] =
     await Promise.all([
       pool.query("SELECT * FROM guardian_spaces ORDER BY created_at ASC"),
       pool.query("SELECT * FROM guardian_sources ORDER BY created_at ASC"),
@@ -372,7 +410,6 @@ export async function initAndHydrateFromPg(seedDefaults: {
       pool.query("SELECT * FROM guardian_validations ORDER BY created_at DESC"),
       pool.query("SELECT * FROM agent_actions ORDER BY timestamp DESC"),
       pool.query("SELECT * FROM guardian_rule_feedback"),
-      pool.query("SELECT * FROM guardian_users ORDER BY created_at ASC"),
     ]);
 
   return {
@@ -563,21 +600,6 @@ export async function initAndHydrateFromPg(seedDefaults: {
         updatedAt: r.updated_at,
       } satisfies RuleFeedbackStat;
     }),
-    users: usersRes.rows.map((r) => ({
-      user: {
-        id: r.id,
-        email: r.email,
-        fullName: r.full_name,
-        role: r.role,
-        department: r.department,
-        status: r.status,
-        permissions: Array.isArray(r.permissions) ? (r.permissions as Permission[]) : [],
-        createdAt: r.created_at,
-        validatedBy: r.validated_by ?? undefined,
-        validatedAt: r.validated_at ?? undefined,
-      } satisfies AuthPrincipal,
-      passwordHash: String(r.password_hash || ""),
-    })),
   };
 }
 
@@ -765,65 +787,267 @@ export async function upsertRuleFeedbackPg(pool: Pool, stat: RuleFeedbackStat): 
   );
 }
 
-export async function insertSeedUserIfMissingPg(
+export interface PgKnowledgeStateSnapshot {
+  documents: Array<{
+    id: string;
+    tenantId: string;
+    spaceId: string;
+    title: string;
+    fileName: string;
+    department: string;
+    classification: "PUBLIC" | "INTERNE" | "RESTREINT" | "CONFIDENTIEL";
+    version: number;
+    sizeBytes: number;
+    documentHash: string;
+    merkleRoot: string;
+    uploadedBy: string;
+    createdAt: string;
+    chunks: unknown[];
+  }>;
+  queries: Array<{
+    queryId: string;
+    tenantId: string;
+    spaceId: string;
+    queryHash: string;
+    merkleProofRoot: string;
+    answer: string;
+    citations: unknown[];
+    confidence: number;
+    bm25LatencyMs: number;
+    vectorLatencyMs: number;
+    totalLatencyMs: number;
+    llmProvider: string;
+    llmModel: string;
+    llmFallbackReason?: string;
+    clearanceApplied: string;
+    createdAt: string;
+  }>;
+  audit: Array<{
+    id: string;
+    tenantId: string;
+    spaceId: string;
+    actorEmail: string;
+    actorRole: string;
+    action: "RAG_QUERY" | "DOCUMENT_INGEST" | "DOCUMENT_DELETE" | "PROOF_VERIFY" | "DOCX_EXPORT";
+    classification: "PUBLIC" | "INTERNE" | "RESTREINT" | "CONFIDENTIEL";
+    resourceSummary: string;
+    latencyMs: number;
+    prevEventHash: string;
+    eventHash: string;
+    timestamp: string;
+  }>;
+  leads: Array<{
+    id: string;
+    organization: string;
+    contactName: string;
+    email: string;
+    employeeCount: string;
+    deploymentMode: "SecNumCloud" | "On-Premise" | "Hybride";
+    message: string;
+    createdAt: string;
+  }>;
+}
+
+export async function loadKnowledgeFromPg(): Promise<PgKnowledgeStateSnapshot | null> {
+  if (!isPgEnabled()) return null;
+  const pool = getPgPool();
+  if (!pool) return null;
+
+  await pool.query(SCHEMA_SQL);
+  await flushPgQueue();
+
+  const [docsRes, queriesRes, auditRes, leadsRes] = await Promise.all([
+    pool.query("SELECT * FROM knowledge_documents ORDER BY created_at DESC"),
+    pool.query("SELECT * FROM knowledge_queries ORDER BY created_at DESC"),
+    pool.query("SELECT * FROM knowledge_audit_ledger ORDER BY timestamp DESC"),
+    pool.query("SELECT * FROM enterprise_leads ORDER BY created_at DESC"),
+  ]);
+
+  return {
+    documents: docsRes.rows.map((r) => ({
+      id: r.id,
+      tenantId: r.tenant_id,
+      spaceId: r.space_id,
+      title: r.title,
+      fileName: r.file_name,
+      department: r.department,
+      classification: r.classification,
+      version: Number(r.version ?? 1),
+      sizeBytes: Number(r.size_bytes ?? 0),
+      documentHash: r.document_hash,
+      merkleRoot: r.merkle_root,
+      uploadedBy: r.uploaded_by,
+      createdAt: r.created_at,
+      chunks: Array.isArray(r.chunks) ? r.chunks : [],
+    })),
+    queries: queriesRes.rows.map((r) => ({
+      queryId: r.query_id,
+      tenantId: r.tenant_id,
+      spaceId: r.space_id,
+      queryHash: r.query_hash,
+      merkleProofRoot: r.merkle_proof_root,
+      answer: r.answer,
+      citations: Array.isArray(r.citations) ? r.citations : [],
+      confidence: Number(r.confidence ?? 0.8),
+      bm25LatencyMs: Number(r.bm25_latency_ms ?? 0),
+      vectorLatencyMs: Number(r.vector_latency_ms ?? 0),
+      totalLatencyMs: Number(r.total_latency_ms ?? 0),
+      llmProvider: r.llm_provider,
+      llmModel: r.llm_model,
+      llmFallbackReason: r.llm_fallback_reason ?? undefined,
+      clearanceApplied: r.clearance_applied,
+      createdAt: r.created_at,
+    })),
+    audit: auditRes.rows.map((r) => ({
+      id: r.id,
+      tenantId: r.tenant_id,
+      spaceId: r.space_id,
+      actorEmail: r.actor_email,
+      actorRole: r.actor_role,
+      action: r.action,
+      classification: r.classification,
+      resourceSummary: r.resource_summary,
+      latencyMs: Number(r.latency_ms ?? 0),
+      prevEventHash: r.prev_event_hash,
+      eventHash: r.event_hash,
+      timestamp: r.timestamp,
+    })),
+    leads: leadsRes.rows.map((r) => ({
+      id: r.id,
+      organization: r.organization,
+      contactName: r.contact_name,
+      email: r.email,
+      employeeCount: r.employee_count,
+      deploymentMode: r.deployment_mode,
+      message: r.message,
+      createdAt: r.created_at,
+    })),
+  };
+}
+
+export async function upsertKnowledgeDocumentPg(
   pool: Pool,
-  user: AuthPrincipal,
-  passwordHash: string
+  doc: PgKnowledgeStateSnapshot["documents"][number]
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO guardian_users (
-       id, email, full_name, role, department, status, permissions,
-       password_hash, created_at, validated_by, validated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)
-     ON CONFLICT (id) DO NOTHING`,
+    `INSERT INTO knowledge_documents (
+       id, tenant_id, space_id, title, file_name, department, classification,
+       version, size_bytes, document_hash, merkle_root, uploaded_by, created_at, chunks
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
+     ON CONFLICT (id) DO UPDATE SET
+       title = EXCLUDED.title,
+       classification = EXCLUDED.classification,
+       version = EXCLUDED.version,
+       chunks = EXCLUDED.chunks`,
     [
-      user.id,
-      user.email.toLowerCase(),
-      user.fullName,
-      user.role,
-      user.department,
-      user.status,
-      JSON.stringify(user.permissions || []),
-      passwordHash,
-      user.createdAt,
-      user.validatedBy ?? null,
-      user.validatedAt ?? null,
+      doc.id,
+      doc.tenantId,
+      doc.spaceId,
+      doc.title,
+      doc.fileName,
+      doc.department,
+      doc.classification,
+      doc.version,
+      doc.sizeBytes,
+      doc.documentHash,
+      doc.merkleRoot,
+      doc.uploadedBy,
+      doc.createdAt,
+      JSON.stringify(doc.chunks),
     ]
   );
 }
 
-export async function upsertUserPg(
+export async function deleteKnowledgeDocumentPg(
   pool: Pool,
-  user: AuthPrincipal,
-  passwordHash: string
+  documentId: string,
+  tenantId: string,
+  spaceId: string
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO guardian_users (
-       id, email, full_name, role, department, status, permissions,
-       password_hash, created_at, validated_by, validated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)
-     ON CONFLICT (id) DO UPDATE SET
-       email = EXCLUDED.email,
-       full_name = EXCLUDED.full_name,
-       role = EXCLUDED.role,
-       department = EXCLUDED.department,
-       status = EXCLUDED.status,
-       permissions = EXCLUDED.permissions,
-       password_hash = EXCLUDED.password_hash,
-       validated_by = EXCLUDED.validated_by,
-       validated_at = EXCLUDED.validated_at`,
+    `DELETE FROM knowledge_documents WHERE id = $1 AND tenant_id = $2 AND space_id = $3`,
+    [documentId, tenantId, spaceId]
+  );
+}
+
+export async function insertKnowledgeQueryPg(
+  pool: Pool,
+  q: PgKnowledgeStateSnapshot["queries"][number]
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO knowledge_queries (
+       query_id, tenant_id, space_id, query_hash, merkle_proof_root, answer,
+       citations, confidence, bm25_latency_ms, vector_latency_ms, total_latency_ms,
+       llm_provider, llm_model, llm_fallback_reason, clearance_applied, created_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+     ON CONFLICT (query_id) DO NOTHING`,
     [
-      user.id,
-      user.email.toLowerCase(),
-      user.fullName,
-      user.role,
-      user.department,
-      user.status,
-      JSON.stringify(user.permissions || []),
-      passwordHash,
-      user.createdAt,
-      user.validatedBy ?? null,
-      user.validatedAt ?? null,
+      q.queryId,
+      q.tenantId,
+      q.spaceId,
+      q.queryHash,
+      q.merkleProofRoot,
+      q.answer,
+      JSON.stringify(q.citations),
+      q.confidence,
+      q.bm25LatencyMs,
+      q.vectorLatencyMs,
+      q.totalLatencyMs,
+      q.llmProvider,
+      q.llmModel,
+      q.llmFallbackReason ?? null,
+      q.clearanceApplied,
+      q.createdAt,
     ]
   );
 }
+
+export async function insertKnowledgeAuditPg(
+  pool: Pool,
+  entry: PgKnowledgeStateSnapshot["audit"][number]
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO knowledge_audit_ledger (
+       id, tenant_id, space_id, actor_email, actor_role, action,
+       classification, resource_summary, latency_ms, prev_event_hash, event_hash, timestamp
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      entry.id,
+      entry.tenantId,
+      entry.spaceId,
+      entry.actorEmail,
+      entry.actorRole,
+      entry.action,
+      entry.classification,
+      entry.resourceSummary,
+      entry.latencyMs,
+      entry.prevEventHash,
+      entry.eventHash,
+      entry.timestamp,
+    ]
+  );
+}
+
+export async function insertEnterpriseLeadPg(
+  pool: Pool,
+  lead: PgKnowledgeStateSnapshot["leads"][number]
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO enterprise_leads (
+       id, organization, contact_name, email, employee_count, deployment_mode, message, created_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      lead.id,
+      lead.organization,
+      lead.contactName,
+      lead.email,
+      lead.employeeCount,
+      lead.deploymentMode,
+      lead.message,
+      lead.createdAt,
+    ]
+  );
+}
+

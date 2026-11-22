@@ -2,7 +2,16 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowLeft, CheckCircle2, Clock, Lock, ShieldCheck, UserPlus } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  Eye,
+  EyeOff,
+  Lock,
+  ShieldCheck,
+  UserPlus,
+} from "lucide-react";
 import { describeApiError, guardianApi } from "@/lib/api";
 
 export default function RegisterPage() {
@@ -14,6 +23,8 @@ export default function RegisterPage() {
   );
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittedUser, setSubmittedUser] = useState<{
@@ -150,7 +161,10 @@ export default function RegisterPage() {
         ) : (
           <>
             {error && (
-              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-400">
+              <div
+                role="alert"
+                className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-400"
+              >
                 {error}
               </div>
             )}
@@ -225,32 +239,52 @@ export default function RegisterPage() {
                   <label className="text-[11px] font-medium text-muted-foreground">
                     Mot de passe (6 car. min.)
                   </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    autoComplete="new-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Mot de passe"
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Mot de passe"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-9 text-xs outline-none focus:border-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground"
+                      aria-label={showPassword ? "Masquer" : "Afficher"}
+                    >
+                      {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground">
                     Confirmer le mot de passe
                   </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    autoComplete="new-password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Confirmation"
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirmation"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-9 text-xs outline-none focus:border-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground"
+                      aria-label={showConfirmPassword ? "Masquer" : "Afficher"}
+                    >
+                      {showConfirmPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
                 </div>
               </div>
 

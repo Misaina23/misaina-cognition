@@ -1,9 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  AccountStatusError,
   authenticateRequest,
-  AuthUnauthorizedError,
   buildClearSessionCookieHeader,
   buildSessionCookieHeader,
   registerPendingAccount,
@@ -11,6 +9,7 @@ import {
   verifyUserCredentials,
 } from "../auth";
 import { journalRepo } from "../journal";
+import { formatApiError } from "../security";
 import { listAuthorizedSpaces } from "../tenant";
 import { readJsonBody, sendJson } from "./sources";
 
@@ -38,7 +37,6 @@ export async function handleAuthRoute(
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       const body = RegisterSchema.parse(await readJsonBody(req));
       const created = registerPendingAccount(body);
-      await journalRepo.flushPg();
       return sendJson(res, 201, {
         registered: true,
         status: created.status,
@@ -86,14 +84,7 @@ export async function handleAuthRoute(
 
     return sendJson(res, 405, { message: "Méthode non supportée" });
   } catch (err) {
-    if (err instanceof AuthUnauthorizedError) {
-      return sendJson(res, 401, { message: err.message });
-    }
-    if (err instanceof AccountStatusError) {
-      return sendJson(res, 403, { message: err.message });
-    }
-    const msg = err instanceof Error ? err.message : "Erreur authentification";
-    const status = msg.includes("existe déjà") ? 409 : 400;
-    return sendJson(res, status, { message: msg });
+    const { status, message } = formatApiError(err, "Erreur authentification");
+    return sendJson(res, status, { message });
   }
 }

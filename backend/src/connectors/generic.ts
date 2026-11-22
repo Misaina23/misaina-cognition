@@ -1,4 +1,5 @@
 import { journalRepo } from "../journal";
+import { validateExternalEndpointUrl } from "../security";
 import {
   buildNormalizedPair,
   type ConnectorIngestResult,
@@ -44,12 +45,16 @@ export class GenericConnector implements SourceConnector {
     if (input.rawItems && input.rawItems.length > 0) {
       items = input.rawItems;
     } else if (source.endpointUrl) {
+      const safeUrl = validateExternalEndpointUrl(source.endpointUrl);
       const headers: Record<string, string> = { Accept: "application/json" };
       const token = source.authTokenEnvName ? process.env[source.authTokenEnvName] : undefined;
       if (token) {
         headers.Authorization = format === "kobo" ? `Token ${token}` : `Bearer ${token}`;
       }
-      const res = await fetch(source.endpointUrl, { headers });
+      const res = await fetch(safeUrl.toString(), {
+        headers,
+        signal: AbortSignal.timeout(15000),
+      });
       if (!res.ok) throw new Error(`Erreur connecteur ${format} (${res.status})`);
       items = extractByPath(await res.json(), source.recordsPath);
     } else {

@@ -5,8 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Ban,
+  Building2,
   CheckCircle2,
+  ChevronDown,
   Clock,
+  Eye,
+  EyeOff,
   KeyRound,
   Lock,
   Plus,
@@ -20,13 +24,18 @@ import {
   UserPlus,
   XCircle,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useSession } from "@/components/SessionProvider";
+import { TableSkeleton } from "@/components/Skeletons";
 import { SpaceHeader } from "@/components/SpaceHeader";
+import { ToastBanner, type BannerMessage } from "@/components/ToastBanner";
 import {
   describeApiError,
   guardianApi,
   isUnauthorizedError,
   type AccountStatus,
   type AuthUser,
+  type EnterpriseLeadRequest,
   type Permission,
   type PermissionOption,
   type UserRole,
@@ -84,18 +93,23 @@ export default function UsersManagementPage() {
   const spaceId = decodeURIComponent(params.spaceId || "");
   const encodedSpaceId = encodeURIComponent(spaceId);
 
-  const [caller, setCaller] = useState<AuthUser | null>(null);
+  const { user: caller } = useSession();
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
+  const [enterpriseLeads, setEnterpriseLeads] = useState<EnterpriseLeadRequest[]>([]);
   const [availablePermissions, setAvailablePermissions] = useState<PermissionOption[]>([]);
   const [rolePresets, setRolePresets] = useState<Record<string, Permission[]>>({});
   const [drafts, setDrafts] = useState<Record<string, UserDraft>>({});
 
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
-  const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [banner, setBanner] = useState<BannerMessage | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [confirmUserAction, setConfirmUserAction] = useState<{
+    kind: "reject" | "suspend" | "reactivate";
+    user: AuthUser;
+  } | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<"all" | AccountStatus>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -105,6 +119,7 @@ export default function UsersManagementPage() {
   const [newEmail, setNewEmail] = useState("");
   const [newDepartment, setNewDepartment] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [newRole, setNewRole] = useState<UserRole>("ANALYSTE");
   const [newSpaceIds, setNewSpaceIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
@@ -119,12 +134,13 @@ export default function UsersManagementPage() {
     setLoading(true);
     setAccessDenied(false);
     try {
-      const meRes = await guardianApi.me();
-      setCaller(meRes.user);
-
-      const dir = await guardianApi.getUsers();
+      const [dir, leadsRes] = await Promise.all([
+        guardianApi.getUsers(),
+        guardianApi.getEnterpriseLeads().catch(() => ({ leads: [] })),
+      ]);
       setUsers(dir.users || []);
       setSpaces(dir.spaces || []);
+      setEnterpriseLeads(leadsRes.leads || []);
       setAvailablePermissions(dir.availablePermissions || []);
       setRolePresets(dir.rolePresets || {});
 
@@ -376,17 +392,7 @@ export default function UsersManagementPage() {
       />
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        {banner && (
-          <div
-            className={`rounded-xl border px-4 py-3 text-xs font-medium ${
-              banner.kind === "err"
-                ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
-                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            }`}
-          >
-            {banner.text}
-          </div>
-        )}
+        <ToastBanner banner={banner} onDismiss={() => setBanner(null)} />
 
         {accessDenied ? (
           <section className="rounded-2xl border border-red-500/30 bg-card p-8 text-center space-y-3 shadow-sm">
@@ -522,15 +528,25 @@ export default function UsersManagementPage() {
                       <label className="text-[11px] font-medium text-muted-foreground">
                         Mot de passe initial (6 car. min.)
                       </label>
-                      <input
-                        type="password"
-                        required
-                        minLength={6}
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Mot de passe robuste"
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
-                      />
+                      <div className="relative">
+                        <input
+                          type={showNewPassword ? "text" : "password"}
+                          required
+                          minLength={6}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Mot de passe robuste"
+                          className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-9 text-xs outline-none focus:border-primary"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword((prev) => !prev)}
+                          className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground"
+                          aria-label={showNewPassword ? "Masquer" : "Afficher"}
+                        >
+                          {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
                     </div>
                     <div className="space-y-1">
                       <label className="text-[11px] font-medium text-muted-foreground">
@@ -693,7 +709,7 @@ export default function UsersManagementPage() {
                             <button
                               type="button"
                               disabled={isBusy}
-                              onClick={() => void handleApproveOrReject(u, "reject")}
+                              onClick={() => setConfirmUserAction({ kind: "reject", user: u })}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-400 hover:bg-red-500/20 disabled:opacity-50"
                             >
                               <XCircle size={13} />
@@ -782,10 +798,8 @@ export default function UsersManagementPage() {
                 </div>
               </div>
 
-              {loading ? (
-                <div className="py-8 text-center text-xs text-muted-foreground">
-                  Chargement de l&apos;annuaire sécurisé…
-                </div>
+              {loading && users.length === 0 ? (
+                <TableSkeleton rows={5} columns={4} />
               ) : filteredDirectoryUsers.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border bg-background/60 p-6 text-center text-xs text-muted-foreground">
                   Aucun utilisateur ne correspond aux critères.
@@ -854,7 +868,12 @@ export default function UsersManagementPage() {
                                 <button
                                   type="button"
                                   disabled={isBusy}
-                                  onClick={() => void handleToggleSuspend(u)}
+                                  onClick={() =>
+                                    setConfirmUserAction({
+                                      kind: u.status === "suspended" ? "reactivate" : "suspend",
+                                      user: u,
+                                    })
+                                  }
                                   className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
                                     u.status === "suspended"
                                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
@@ -990,9 +1009,118 @@ export default function UsersManagementPage() {
                 </div>
               )}
             </section>
+
+            {/* Demandes Déploiement Grands Comptes */}
+            <details className="group rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Building2 size={16} className="text-primary" />
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">
+                      Demandes Déploiement Grands Comptes ({enterpriseLeads.length})
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Sollicitations soumises via le formulaire public SecNumCloud / On-Premise.
+                    </p>
+                  </div>
+                </div>
+                <ChevronDown
+                  size={16}
+                  className="text-muted-foreground transition-transform group-open:rotate-180"
+                />
+              </summary>
+
+              <div className="mt-4 border-t border-border pt-4">
+                {enterpriseLeads.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Aucune demande commerciale ou d&apos;audit reçue pour le moment.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="py-2 pr-3">Ticket</th>
+                          <th className="py-2 pr-3">Organisation</th>
+                          <th className="py-2 pr-3">Contact</th>
+                          <th className="py-2 pr-3">Effectif</th>
+                          <th className="py-2 pr-3">Architecture</th>
+                          <th className="py-2 pr-3">Besoin</th>
+                          <th className="py-2 text-right">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {enterpriseLeads.map((lead) => (
+                          <tr key={lead.id}>
+                            <td className="py-2 pr-3 font-mono text-[11px] text-primary">
+                              {lead.id}
+                            </td>
+                            <td className="py-2 pr-3 font-semibold text-foreground">
+                              {lead.organization}
+                            </td>
+                            <td className="py-2 pr-3 text-muted-foreground">
+                              {lead.contactName} ({lead.email})
+                            </td>
+                            <td className="py-2 pr-3 font-mono text-[11px]">
+                              {lead.employeeCount}
+                            </td>
+                            <td className="py-2 pr-3 font-mono text-[11px] text-primary">
+                              {lead.deploymentMode}
+                            </td>
+                            <td className="py-2 pr-3 text-muted-foreground max-w-xs truncate">
+                              {lead.message}
+                            </td>
+                            <td className="py-2 text-right font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                              {new Date(lead.createdAt).toLocaleDateString("fr-FR")}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </details>
           </>
         )}
       </main>
+
+      <ConfirmDialog
+        open={Boolean(confirmUserAction)}
+        title={
+          confirmUserAction?.kind === "reject"
+            ? `Refuser la demande de ${confirmUserAction.user.fullName} ?`
+            : confirmUserAction?.kind === "suspend"
+              ? `Suspendre le compte de ${confirmUserAction.user.fullName} ?`
+              : `Réactiver le compte de ${confirmUserAction?.user.fullName} ?`
+        }
+        description={
+          confirmUserAction?.kind === "reject"
+            ? "La demande d'accès sera marquée comme refusée et la connexion restera bloquée."
+            : confirmUserAction?.kind === "suspend"
+              ? "L'utilisateur perdra immédiatement l'accès à ses sessions et périmètres isolés."
+              : "L'utilisateur retrouvera l'accès aux espaces et permissions qui lui sont assignés."
+        }
+        confirmLabel={
+          confirmUserAction?.kind === "reject"
+            ? "Refuser le compte"
+            : confirmUserAction?.kind === "suspend"
+              ? "Suspendre immédiatement"
+              : "Réactiver le compte"
+        }
+        variant={confirmUserAction?.kind === "reactivate" ? "warning" : "danger"}
+        busy={Boolean(busyUserId)}
+        onCancel={() => setConfirmUserAction(null)}
+        onConfirm={async () => {
+          if (!confirmUserAction) return;
+          if (confirmUserAction.kind === "reject") {
+            await handleApproveOrReject(confirmUserAction.user, "reject");
+          } else {
+            await handleToggleSuspend(confirmUserAction.user);
+          }
+          setConfirmUserAction(null);
+        }}
+      />
     </div>
   );
 }

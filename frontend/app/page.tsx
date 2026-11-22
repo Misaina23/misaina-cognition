@@ -469,7 +469,7 @@ export default function ShowcaseLandingPage() {
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div className="space-y-2 max-w-2xl">
                 <p className="text-xs font-semibold uppercase tracking-widest text-primary">
-                  Architecture Technique du Pipeline (Aperçu Statique)
+                  Architecture Technique du Pipeline RAG
                 </p>
                 <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
                   Inspectez le calcul RRF et la preuve cryptographique

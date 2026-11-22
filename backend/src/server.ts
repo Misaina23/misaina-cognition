@@ -2,12 +2,14 @@ import http from "node:http";
 import { journalRepo } from "./journal";
 import { createLlmProvider } from "./llm/provider";
 import { checkPgHealth, closePgPool } from "./pgStore";
+import { knowledgeEngine } from "./rag/engine";
 import { handleActionsRoute } from "./routes/actions";
 import { handleAuthRoute } from "./routes/auth";
 import { handleKnowledgeRoute } from "./routes/knowledge";
 import { handleRunsRoute } from "./routes/runs";
 import { handleSourcesRoute, sendJson } from "./routes/sources";
 import { handleUsersRoute } from "./routes/users";
+import { getClientIpAddress, publicApiRateLimiter } from "./security";
 import { startWorker, stopWorker } from "./worker";
 
 const PORT = Number(process.env.BACKEND_PORT || process.env.PORT || 4000);
@@ -85,6 +87,10 @@ export function createGuardianServer() {
       "Content-Type,Authorization,X-Webhook-Secret,X-Requested-With"
     );
     res.setHeader("Access-Control-Max-Age", "86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -93,6 +99,25 @@ export function createGuardianServer() {
     }
 
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+
+    // Rate limiting sur endpoints publics et authentification
+    const clientIp = getClientIpAddress(req);
+    if (req.method === "POST") {
+      let rateDecision: { allowed: boolean; retryAfterSeconds: number } | null = null;
+      if (url.pathname === "/api/auth/login") {
+        rateDecision = publicApiRateLimiter.consume(`login:${clientIp}`, 30, 5 * 60 * 1000);
+      } else if (url.pathname === "/api/auth/register") {
+        rateDecision = publicApiRateLimiter.consume(`register:${clientIp}`, 15, 10 * 60 * 1000);
+      } else if (url.pathname === "/api/contact/enterprise") {
+        rateDecision = publicApiRateLimiter.consume(`contact:${clientIp}`, 10, 10 * 60 * 1000);
+      }
+      if (rateDecision && !rateDecision.allowed) {
+        res.setHeader("Retry-After", String(rateDecision.retryAfterSeconds));
+        return sendJson(res, 429, {
+          message: `Trop de tentatives. Veuillez réessayer dans ${rateDecision.retryAfterSeconds}s.`,
+        });
+      }
+    }
 
     // CSRF protection on cookie-authenticated mutating requests
     const method = (req.method || "GET").toUpperCase();
@@ -141,9 +166,10 @@ export function createGuardianServer() {
         storage: health.storage,
         llmProvider: activeLlm.providerName,
         llmModel: activeLlm.modelName,
+        uptimeSec: Math.round(process.uptime()),
+        timestamp: new Date().toISOString(),
       });
     }
-    await journalRepo.ensureReady();
     if (url.pathname.startsWith("/api/auth")) {
       return handleAuthRoute(req, res, url);
     }
@@ -180,8 +206,7 @@ export function createGuardianServer() {
 
 if (require.main === module) {
   const server = createGuardianServer();
-  void journalRepo
-    .ensureReady()
+  void Promise.all([journalRepo.ensureReady(), knowledgeEngine.ensureReady()])
     .catch((err) => {
       console.error("Erreur hydratation initiale du journal :", err);
     })

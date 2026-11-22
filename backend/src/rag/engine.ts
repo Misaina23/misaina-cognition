@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import {
   AlignmentType,
   Document,
@@ -14,6 +16,18 @@ import {
 } from "docx";
 import type { TenantSpaceContext } from "../connectors/types";
 import { createLlmProvider } from "../llm/provider";
+import {
+  deleteKnowledgeDocumentPg,
+  enqueuePgTask,
+  flushPgQueue,
+  insertEnterpriseLeadPg,
+  insertKnowledgeAuditPg,
+  insertKnowledgeQueryPg,
+  isPgEnabled,
+  loadKnowledgeFromPg,
+  upsertKnowledgeDocumentPg,
+} from "../pgStore";
+import { getCitationSealSecret } from "../security";
 
 export type ClassificationLevel = "PUBLIC" | "INTERNE" | "RESTREINT" | "CONFIDENTIEL";
 
@@ -76,6 +90,7 @@ export interface KnowledgeQueryResult {
   totalLatencyMs: number;
   llmProvider: string;
   llmModel: string;
+  llmFallbackReason?: string;
   tenantId: string;
   spaceId: string;
   clearanceApplied: string;
@@ -108,16 +123,44 @@ export interface EnterpriseLeadRequest {
   createdAt: string;
 }
 
-const SEAL_SECRET =
-  process.env.CITATION_SEAL_SECRET || "misaina-sovereign-cryptographic-seal-2026-pssi";
 const VECTOR_DIM = 128;
+
+function isKnowledgePersistenceDisabled(): boolean {
+  if (process.env.GUARDIAN_DISABLE_DISK_STATE === "1") return true;
+  return process.argv.some((arg) =>
+    /[/\\](tests|scripts)[/\\]|evaluate\.|idempotence\.test|isolation\.test/.test(arg)
+  );
+}
+
+function getBackendRoot(): string {
+  const cwd = process.cwd();
+  return fs.existsSync(path.join(cwd, "config", "projects")) ? cwd : path.join(cwd, "backend");
+}
+
+function getKnowledgeStateFilePath(): string {
+  return path.join(getBackendRoot(), "data", "knowledge-state.json");
+}
 
 function sha256(input: string): string {
   return crypto.createHash("sha256").update(input, "utf8").digest("hex");
 }
 
 function signProof(payload: string): string {
-  return crypto.createHmac("sha256", SEAL_SECRET).update(payload, "utf8").digest("hex");
+  return crypto.createHmac("sha256", getCitationSealSecret()).update(payload, "utf8").digest("hex");
+}
+
+function computeAuditEventHash(params: {
+  prevEventHash: string;
+  tenantId: string;
+  spaceId: string;
+  actorEmail: string;
+  action: AuditLedgerEntry["action"];
+  resourceSummary: string;
+  timestamp: string;
+}): string {
+  return sha256(
+    `${params.prevEventHash}|${params.tenantId}|${params.spaceId}|${params.actorEmail}|${params.action}|${params.resourceSummary}|${params.timestamp}`
+  );
 }
 
 function normalizeAndTokenize(text: string): string[] {
@@ -234,12 +277,99 @@ class SovereignKnowledgeEngine {
   private queriesByScope = new Map<string, KnowledgeQueryResult[]>();
   private auditByScope = new Map<string, AuditLedgerEntry[]>();
   private leads: EnterpriseLeadRequest[] = [];
+  private diskHydrated = false;
+  private pgHydrated = false;
 
   private scopeKey(ctx: TenantSpaceContext): string {
     return `${ctx.tenantId}::${ctx.spaceId}`;
   }
 
+  private hydrateDiskOnce(): void {
+    if (this.diskHydrated) return;
+    this.diskHydrated = true;
+    if (isKnowledgePersistenceDisabled() || isPgEnabled()) return;
+    const filePath = getKnowledgeStateFilePath();
+    if (!fs.existsSync(filePath)) return;
+    try {
+      const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+        docsByScope?: Array<[string, KnowledgeDocument[]]>;
+        queriesByScope?: Array<[string, KnowledgeQueryResult[]]>;
+        auditByScope?: Array<[string, AuditLedgerEntry[]]>;
+        leads?: EnterpriseLeadRequest[];
+      };
+      if (Array.isArray(raw.docsByScope)) this.docsByScope = new Map(raw.docsByScope);
+      if (Array.isArray(raw.queriesByScope)) this.queriesByScope = new Map(raw.queriesByScope);
+      if (Array.isArray(raw.auditByScope)) this.auditByScope = new Map(raw.auditByScope);
+      if (Array.isArray(raw.leads)) this.leads = raw.leads;
+    } catch (err) {
+      console.error("Impossible de restaurer backend/data/knowledge-state.json :", err);
+    }
+  }
+
+  private persistDisk(): void {
+    if (isKnowledgePersistenceDisabled() || isPgEnabled()) return;
+    try {
+      const filePath = getKnowledgeStateFilePath();
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const tmpPath = `${filePath}.${process.pid}.tmp`;
+      fs.writeFileSync(
+        tmpPath,
+        JSON.stringify(
+          {
+            docsByScope: Array.from(this.docsByScope.entries()),
+            queriesByScope: Array.from(this.queriesByScope.entries()),
+            auditByScope: Array.from(this.auditByScope.entries()),
+            leads: this.leads,
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      fs.renameSync(tmpPath, filePath);
+    } catch (err) {
+      console.error("Impossible de sauvegarder backend/data/knowledge-state.json :", err);
+    }
+  }
+
+  async ensureReady(): Promise<void> {
+    this.hydrateDiskOnce();
+    if (!isPgEnabled() || this.pgHydrated) return;
+    const snapshot = await loadKnowledgeFromPg();
+    if (!snapshot) return;
+    this.pgHydrated = true;
+
+    this.docsByScope.clear();
+    this.queriesByScope.clear();
+    this.auditByScope.clear();
+
+    for (const d of snapshot.documents) {
+      const key = `${d.tenantId}::${d.spaceId}`;
+      const list = this.docsByScope.get(key) || [];
+      list.push(d as KnowledgeDocument);
+      this.docsByScope.set(key, list);
+    }
+    for (const q of snapshot.queries) {
+      const key = `${q.tenantId}::${q.spaceId}`;
+      const list = this.queriesByScope.get(key) || [];
+      list.push(q as KnowledgeQueryResult);
+      this.queriesByScope.set(key, list);
+    }
+    for (const a of snapshot.audit) {
+      const key = `${a.tenantId}::${a.spaceId}`;
+      const list = this.auditByScope.get(key) || [];
+      list.push(a);
+      this.auditByScope.set(key, list);
+    }
+    this.leads = snapshot.leads;
+  }
+
+  async flushPg(): Promise<void> {
+    await flushPgQueue();
+  }
+
   private ensureSeeded(ctx: TenantSpaceContext): void {
+    this.hydrateDiskOnce();
     const key = this.scopeKey(ctx);
     if (this.docsByScope.has(key)) return;
 
@@ -327,24 +457,30 @@ class SovereignKnowledgeEngine {
       });
     }
 
+    const initEntry: AuditLedgerEntry = {
+      id: `aud-init-${ctx.spaceId}`,
+      tenantId: ctx.tenantId,
+      spaceId: ctx.spaceId,
+      actorEmail: "systeme@misaina-corp.org",
+      actorRole: "SYSTEM",
+      action: "DOCUMENT_INGEST",
+      classification: "CONFIDENTIEL",
+      resourceSummary: `Initialisation du coffre souverain (${createdDocs.length} documents scellés SHA-256)`,
+      latencyMs: 14,
+      prevEventHash: "0000000000000000000000000000000000000000000000000000000000000000",
+      eventHash: sha256(`INIT:${key}:${createdDocs.map((d) => d.documentHash).join(",")}`),
+      timestamp: new Date(Date.now() - 3600_000).toISOString(),
+    };
+
     this.docsByScope.set(key, createdDocs);
     this.queriesByScope.set(key, []);
-    this.auditByScope.set(key, [
-      {
-        id: `aud-init-${Date.now()}`,
-        tenantId: ctx.tenantId,
-        spaceId: ctx.spaceId,
-        actorEmail: "systeme@misaina-corp.org",
-        actorRole: "SYSTEM",
-        action: "DOCUMENT_INGEST",
-        classification: "CONFIDENTIEL",
-        resourceSummary: `Initialisation du coffre souverain (${createdDocs.length} documents scellés SHA-256)`,
-        latencyMs: 14,
-        prevEventHash: "0000000000000000000000000000000000000000000000000000000000000000",
-        eventHash: sha256(`INIT:${key}:${createdDocs.map((d) => d.documentHash).join(",")}`),
-        timestamp: new Date(Date.now() - 3600_000).toISOString(),
-      },
-    ]);
+    this.auditByScope.set(key, [initEntry]);
+
+    for (const d of createdDocs) {
+      enqueuePgTask((pool) => upsertKnowledgeDocumentPg(pool, d));
+    }
+    enqueuePgTask((pool) => insertKnowledgeAuditPg(pool, initEntry));
+    this.persistDisk();
   }
 
   private appendAudit(
@@ -364,9 +500,15 @@ class SovereignKnowledgeEngine {
         ? list[0].eventHash
         : "0000000000000000000000000000000000000000000000000000000000000000";
     const timestamp = new Date().toISOString();
-    const eventHash = sha256(
-      `${prevHash}|${ctx.tenantId}|${ctx.spaceId}|${actorEmail}|${action}|${resourceSummary}|${timestamp}`
-    );
+    const eventHash = computeAuditEventHash({
+      prevEventHash: prevHash,
+      tenantId: ctx.tenantId,
+      spaceId: ctx.spaceId,
+      actorEmail,
+      action,
+      resourceSummary,
+      timestamp,
+    });
     const entry: AuditLedgerEntry = {
       id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       tenantId: ctx.tenantId,
@@ -383,6 +525,8 @@ class SovereignKnowledgeEngine {
     };
     list.unshift(entry);
     this.auditByScope.set(key, list.slice(0, 200));
+    enqueuePgTask((pool) => insertKnowledgeAuditPg(pool, entry));
+    this.persistDisk();
     return entry;
   }
 
@@ -433,6 +577,7 @@ class SovereignKnowledgeEngine {
 
     docs.unshift(doc);
     this.docsByScope.set(key, docs);
+    enqueuePgTask((pool) => upsertKnowledgeDocumentPg(pool, doc));
 
     this.appendAudit(
       ctx,
@@ -443,6 +588,7 @@ class SovereignKnowledgeEngine {
       `Ingestion "${doc.title}" (${chunks.length} fragments, SHA-256 ${documentHash.slice(0, 12)})`,
       Math.max(2, Date.now() - started)
     );
+    this.persistDisk();
 
     return doc;
   }
@@ -463,6 +609,9 @@ class SovereignKnowledgeEngine {
       key,
       docs.filter((d) => d.id !== documentId)
     );
+    enqueuePgTask((pool) =>
+      deleteKnowledgeDocumentPg(pool, documentId, ctx.tenantId, ctx.spaceId)
+    );
     this.appendAudit(
       ctx,
       actorEmail,
@@ -472,6 +621,7 @@ class SovereignKnowledgeEngine {
       `Retrait document "${target.title}" (SHA-256 ${target.documentHash.slice(0, 12)})`,
       3
     );
+    this.persistDisk();
     return true;
   }
 
@@ -602,6 +752,7 @@ class SovereignKnowledgeEngine {
     let answer = "";
     let usedProvider = llm.providerName;
     let usedModel = llm.modelName;
+    let llmFallbackReason: string | undefined;
 
     if (llm.providerName !== "deterministic" && llm.providerName !== "mock" && citations.length > 0) {
       try {
@@ -624,8 +775,15 @@ class SovereignKnowledgeEngine {
         });
         if (llmRes.text.trim()) {
           answer = llmRes.text.trim();
+        } else {
+          llmFallbackReason = "Réponse LLM vide — repli sur synthèse extractive certifiée.";
         }
-      } catch {
+      } catch (err) {
+        llmFallbackReason =
+          err instanceof Error
+            ? `Repli déterministe (${err.message.slice(0, 120)})`
+            : "Repli déterministe suite à une indisponibilité LLM.";
+        console.warn("[SovereignKnowledgeEngine] Fallback LLM :", llmFallbackReason);
         usedProvider = "deterministic";
         usedModel = "sovereign-rag-extractive-v1";
       }
@@ -667,6 +825,7 @@ class SovereignKnowledgeEngine {
       totalLatencyMs,
       llmProvider: usedProvider,
       llmModel: usedModel,
+      ...(llmFallbackReason ? { llmFallbackReason } : {}),
       tenantId: ctx.tenantId,
       spaceId: ctx.spaceId,
       clearanceApplied: params.clearanceFilter || "ALL",
@@ -677,6 +836,7 @@ class SovereignKnowledgeEngine {
     const history = this.queriesByScope.get(key) || [];
     history.unshift(result);
     this.queriesByScope.set(key, history.slice(0, 50));
+    enqueuePgTask((pool) => insertKnowledgeQueryPg(pool, result));
 
     this.appendAudit(
       ctx,
@@ -689,6 +849,7 @@ class SovereignKnowledgeEngine {
       `Requête RAG "${params.question.slice(0, 60)}" -> ${citations.length} citation(s) (Merkle ${merkleProofRoot.slice(0, 12)})`,
       totalLatencyMs
     );
+    this.persistDisk();
 
     return result;
   }
@@ -751,6 +912,71 @@ class SovereignKnowledgeEngine {
   listAudit(ctx: TenantSpaceContext): AuditLedgerEntry[] {
     this.ensureSeeded(ctx);
     return this.auditByScope.get(this.scopeKey(ctx)) || [];
+  }
+
+  verifyAuditChain(ctx: TenantSpaceContext): {
+    intact: boolean;
+    totalEntries: number;
+    verifiedLinks: number;
+    brokenAtId?: string;
+    reason?: string;
+    verifiedAt: string;
+  } {
+    const entries = this.listAudit(ctx);
+    // entries[0] is newest, entries[entries.length - 1] is oldest
+    if (entries.length === 0) {
+      return {
+        intact: true,
+        totalEntries: 0,
+        verifiedLinks: 0,
+        verifiedAt: new Date().toISOString(),
+      };
+    }
+
+    let verifiedLinks = 0;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const current = entries[i];
+      if (i < entries.length - 1) {
+        const older = entries[i + 1];
+        if (current.prevEventHash !== older.eventHash) {
+          return {
+            intact: false,
+            totalEntries: entries.length,
+            verifiedLinks,
+            brokenAtId: current.id,
+            reason: "Rupture du chaînage SHA-256 avec l'événement précédent.",
+            verifiedAt: new Date().toISOString(),
+          };
+        }
+        const expectedHash = computeAuditEventHash({
+          prevEventHash: current.prevEventHash,
+          tenantId: current.tenantId,
+          spaceId: current.spaceId,
+          actorEmail: current.actorEmail,
+          action: current.action,
+          resourceSummary: current.resourceSummary,
+          timestamp: current.timestamp,
+        });
+        if (expectedHash !== current.eventHash) {
+          return {
+            intact: false,
+            totalEntries: entries.length,
+            verifiedLinks,
+            brokenAtId: current.id,
+            reason: "Condensat SHA-256 d'événement non conforme (altération détectée).",
+            verifiedAt: new Date().toISOString(),
+          };
+        }
+      }
+      verifiedLinks += 1;
+    }
+
+    return {
+      intact: true,
+      totalEntries: entries.length,
+      verifiedLinks,
+      verifiedAt: new Date().toISOString(),
+    };
   }
 
   listQueries(ctx: TenantSpaceContext): KnowledgeQueryResult[] {
@@ -936,13 +1162,21 @@ class SovereignKnowledgeEngine {
   }
 
   registerEnterpriseLead(input: Omit<EnterpriseLeadRequest, "id" | "createdAt">): EnterpriseLeadRequest {
+    this.hydrateDiskOnce();
     const entry: EnterpriseLeadRequest = {
       ...input,
       id: `LEAD-${Date.now().toString(36).toUpperCase()}`,
       createdAt: new Date().toISOString(),
     };
     this.leads.unshift(entry);
+    enqueuePgTask((pool) => insertEnterpriseLeadPg(pool, entry));
+    this.persistDisk();
     return entry;
+  }
+
+  listEnterpriseLeads(): EnterpriseLeadRequest[] {
+    this.hydrateDiskOnce();
+    return [...this.leads];
   }
 }
 

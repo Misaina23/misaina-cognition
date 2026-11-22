@@ -15,7 +15,6 @@ import {
   type Permission,
   type UserRole,
 } from "./tenant";
-import { enqueuePgTask, isPgEnabled, upsertSpacePg, upsertUserPg } from "./pgStore";
 
 export const SESSION_COOKIE_NAME = "gardien_session";
 export const SESSION_TTL_SECONDS = 86400; // 24h
@@ -64,44 +63,10 @@ function getUsersStateFilePath(): string {
   return path.join(getBackendRoot(), "data", "users-state.json");
 }
 
-export function getSeedUsersWithHashes(): Array<{
-  user: AuthPrincipal;
-  passwordHash: string;
-}> {
-  return DEFAULT_USERS.map((u) => ({
-    user: { ...u, permissions: [...u.permissions] },
-    passwordHash: USER_PASSWORD_HASHES[u.id] || "",
-  }));
-}
-
-export function applyPgUsersSnapshot(
-  rows: Array<{ user: AuthPrincipal; passwordHash: string }>
-): void {
-  usersHydrated = true;
-  if (!Array.isArray(rows) || rows.length === 0) return;
-
-  for (const row of rows) {
-    const idx = usersRegistry.findIndex((u) => u.id === row.user.id);
-    if (idx >= 0) {
-      usersRegistry[idx] = row.user;
-    } else {
-      usersRegistry.push(row.user);
-    }
-    if (row.passwordHash && row.passwordHash.includes(":")) {
-      USER_PASSWORD_HASHES[row.user.id] = row.passwordHash;
-    }
-  }
-  for (const seed of DEFAULT_USERS) {
-    if (!usersRegistry.some((u) => u.id === seed.id)) {
-      usersRegistry.unshift({ ...seed, permissions: [...seed.permissions] });
-    }
-  }
-}
-
 export function ensureUsersHydrated(): void {
   if (usersHydrated) return;
   usersHydrated = true;
-  if (isTestProcess() || isPgEnabled()) return;
+  if (isTestProcess()) return;
 
   const filePath = getUsersStateFilePath();
   if (!fs.existsSync(filePath)) return;
@@ -138,29 +103,8 @@ export function ensureUsersHydrated(): void {
   }
 }
 
-export function persistUsersState(
-  changedUsers?: AuthPrincipal[],
-  changedSpaces?: (typeof tenantSpacesRegistry)[number][]
-): void {
+export function persistUsersState(): void {
   if (isTestProcess()) return;
-
-  if (isPgEnabled()) {
-    const usersToSync =
-      changedUsers && changedUsers.length > 0 ? changedUsers : usersRegistry;
-    for (const u of usersToSync) {
-      const hash = USER_PASSWORD_HASHES[u.id];
-      if (hash) {
-        enqueuePgTask((pool) => upsertUserPg(pool, u, hash));
-      }
-    }
-    if (changedSpaces && changedSpaces.length > 0) {
-      for (const sp of changedSpaces) {
-        enqueuePgTask((pool) => upsertSpacePg(pool, sp));
-      }
-    }
-    return;
-  }
-
   try {
     const filePath = getUsersStateFilePath();
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -374,7 +318,7 @@ export function registerPendingAccount(input: {
 
   USER_PASSWORD_HASHES[id] = hashPassword(input.password);
   usersRegistry.push(account);
-  persistUsersState([account]);
+  persistUsersState();
   return account;
 }
 
@@ -423,30 +367,24 @@ export function createValidatedAccountByAdmin(
 
   USER_PASSWORD_HASHES[id] = hashPassword(input.password);
   usersRegistry.push(account);
-  const modifiedSpaces = assignUserToSpaces(account, input.spaceIds);
-  persistUsersState([account], modifiedSpaces);
+  assignUserToSpaces(account, input.spaceIds);
+  persistUsersState();
   return account;
 }
 
-export function assignUserToSpaces(
-  user: AuthPrincipal,
-  spaceIds?: string[]
-): (typeof tenantSpacesRegistry)[number][] {
+export function assignUserToSpaces(user: AuthPrincipal, spaceIds?: string[]): void {
   const userTenant = deriveTenantId(user.department);
-  const modified: (typeof tenantSpacesRegistry)[number][] = [];
   if (Array.isArray(spaceIds) && spaceIds.length > 0) {
     for (const sp of tenantSpacesRegistry) {
       const wantsMember = spaceIds.includes(sp.id);
       const isMember = sp.memberUserIds.includes(user.id);
       if (wantsMember && !isMember) {
         sp.memberUserIds.push(user.id);
-        modified.push(sp);
       } else if (!wantsMember && isMember && sp.ownerUserId !== user.id) {
         sp.memberUserIds = sp.memberUserIds.filter((id) => id !== user.id);
-        modified.push(sp);
       }
     }
-    return modified;
+    return;
   }
 
   // Ensure active non-super-admin users belong to at least one space in their tenant
@@ -455,19 +393,16 @@ export function assignUserToSpaces(
     if (existing) {
       if (!existing.memberUserIds.includes(user.id)) {
         existing.memberUserIds.push(user.id);
-        modified.push(existing);
       }
     } else {
-      const created = createUserSpace(
+      createUserSpace(
         userTenant,
         user.id,
         `Espace Principal — ${user.department}`,
         "Espace isolé attribué lors de la validation"
       );
-      modified.push(created);
     }
   }
-  return modified;
 }
 
 export function approveOrRejectPendingAccount(
@@ -501,7 +436,7 @@ export function approveOrRejectPendingAccount(
 
   if (input.decision === "reject") {
     target.status = "rejected";
-    persistUsersState([target]);
+    persistUsersState();
     return target;
   }
 
@@ -513,8 +448,8 @@ export function approveOrRejectPendingAccount(
       ? input.permissions.filter((p): p is Permission => ALL_PERMISSIONS.includes(p))
       : [...(ROLE_PERMISSION_PRESETS[nextRole] || ROLE_PERMISSION_PRESETS.COORDINATEUR)];
 
-  const modifiedSpaces = assignUserToSpaces(target, input.spaceIds);
-  persistUsersState([target], modifiedSpaces);
+  assignUserToSpaces(target, input.spaceIds);
+  persistUsersState();
   return target;
 }
 
@@ -577,12 +512,11 @@ export function updateAccountPermissions(
   if (input.status) {
     target.status = input.status;
   }
-  let modifiedSpaces: (typeof tenantSpacesRegistry)[number][] = [];
   if (Array.isArray(input.spaceIds)) {
-    modifiedSpaces = assignUserToSpaces(target, input.spaceIds);
+    assignUserToSpaces(target, input.spaceIds);
   }
 
-  persistUsersState([target], modifiedSpaces);
+  persistUsersState();
   return target;
 }
 

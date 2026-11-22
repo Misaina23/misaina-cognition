@@ -1,0 +1,26 @@
+{
+  "reason": "blocking_anomalies",
+  "count": 4,
+  "anomalies": [
+    {
+      "id": "anom-run-1795373937859-q55u-1",
+      "recordId": "rec-src-space-1795373937833-pjwy-generic-1795373937833-14cc8620c385-1795373937836-2",
+      "ruleId": "range_age"
+    },
+    {
+      "id": "anom-run-1795373937859-q55u-3",
+      "recordId": "rec-src-space-1795373937833-pjwy-generic-1795373937833-90f194aac012-1795373937836-1",
+      "ruleId": "exact_duplicate_business_key"
+    },
+    {
+      "id": "anom-run-1795373937859-q55u-4",
+      "recordId": "rec-src-space-1795373937833-pjwy-generic-1795373937833-d5a54db1b44b-1795373937837-5",
+      "ruleId": "enumerator_copy_paste"
+    },
+    {
+      "id": "anom-run-1795373937859-q55u-5",
+      "recordId": "rec-src-space-1795373937833-pjwy-generic-1795373937833-5db8fee809ce-1795373937837-6",
+      "ruleId": "enumerator_copy_paste"
+    }
+  ]
+}

@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { AuthUnauthorizedError } from "../auth";
+import { authenticateRequest } from "../auth";
 import { journalRepo } from "../journal";
 import { knowledgeEngine, type ClassificationLevel, type CryptographicCitation } from "../rag/engine";
-import { requirePermission, TenantIsolationError } from "../tenant";
+import { formatApiError } from "../security";
+import { requirePermission } from "../tenant";
 import { readJsonBody, resolveHttpContext, sendJson } from "./sources";
 
 const IngestDocSchema = z.object({
@@ -53,10 +54,13 @@ export async function handleKnowledgeRoute(
   url: URL
 ): Promise<void> {
   try {
+    await Promise.all([journalRepo.ensureReady(), knowledgeEngine.ensureReady()]);
+
     // Public lead capture endpoint for showcase landing page
     if (url.pathname === "/api/contact/enterprise" && req.method === "POST") {
       const body = EnterpriseContactSchema.parse(await readJsonBody(req));
       const ticket = knowledgeEngine.registerEnterpriseLead(body);
+      await knowledgeEngine.flushPg();
       return sendJson(res, 201, {
         ticketId: ticket.id,
         status: "ENREGISTRE",
@@ -65,7 +69,13 @@ export async function handleKnowledgeRoute(
       });
     }
 
-    await journalRepo.ensureReady();
+    if (url.pathname === "/api/contact/enterprise" && req.method === "GET") {
+      const caller = authenticateRequest(req);
+      requirePermission(caller, "users:manage");
+      return sendJson(res, 200, {
+        leads: knowledgeEngine.listEnterpriseLeads(),
+      });
+    }
 
     if (url.pathname === "/api/knowledge/documents" && req.method === "GET") {
       const { user, ctx } = resolveHttpContext(req, url);
@@ -91,6 +101,7 @@ export async function handleKnowledgeRoute(
         actorEmail: user.email,
         actorRole: user.role,
       });
+      await knowledgeEngine.flushPg();
       return sendJson(res, 201, { document: doc });
     }
 
@@ -102,6 +113,7 @@ export async function handleKnowledgeRoute(
       requirePermission(user, "knowledge:write");
       const deleted = knowledgeEngine.deleteDocument(ctx, docId, user.email, user.role);
       if (!deleted) return sendJson(res, 404, { message: "Document introuvable." });
+      await knowledgeEngine.flushPg();
       return sendJson(res, 200, { deleted: true, id: docId });
     }
 
@@ -115,6 +127,7 @@ export async function handleKnowledgeRoute(
         actorEmail: user.email,
         actorRole: user.role,
       });
+      await knowledgeEngine.flushPg();
       return sendJson(res, 200, result);
     }
 
@@ -140,7 +153,15 @@ export async function handleKnowledgeRoute(
         actorEmail: user.email,
         actorRole: user.role,
       });
+      await knowledgeEngine.flushPg();
       return sendJson(res, 200, verification);
+    }
+
+    if (url.pathname === "/api/knowledge/verify-audit-chain" && req.method === "POST") {
+      const body = z.object({ spaceId: z.string().optional() }).parse(await readJsonBody(req));
+      const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "knowledge:read");
+      return sendJson(res, 200, knowledgeEngine.verifyAuditChain(ctx));
     }
 
     if (url.pathname === "/api/knowledge/export-docx" && req.method === "POST") {
@@ -156,6 +177,7 @@ export async function handleKnowledgeRoute(
         actorEmail: user.email,
         actorRole: user.role,
       });
+      await knowledgeEngine.flushPg();
       res.writeHead(200, {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -179,10 +201,7 @@ export async function handleKnowledgeRoute(
 
     return sendJson(res, 404, { message: "Route knowledge introuvable" });
   } catch (err) {
-    if (err instanceof AuthUnauthorizedError) return sendJson(res, 401, { message: err.message });
-    if (err instanceof TenantIsolationError) return sendJson(res, 403, { message: err.message });
-    return sendJson(res, 400, {
-      message: err instanceof Error ? err.message : "Erreur moteur de connaissance",
-    });
+    const { status, message } = formatApiError(err, "Erreur moteur de connaissance");
+    return sendJson(res, status, { message });
   }
 }

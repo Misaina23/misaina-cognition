@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { SessionProvider } from "@/components/SessionProvider";
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -29,7 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="fr" className={`${plusJakarta.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <body className="min-h-screen font-sans antialiased selection:bg-primary/20 selection:text-primary">
-        {children}
+        <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
   );

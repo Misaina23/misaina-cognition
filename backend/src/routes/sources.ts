@@ -1,19 +1,19 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { runGuardianAgent } from "../agent/agent";
-import { authenticateRequest, AuthUnauthorizedError } from "../auth";
+import { authenticateRequest } from "../auth";
 import { CommCareConnector } from "../connectors/commcare";
 import { CsvConnector } from "../connectors/csv";
 import { ExcelConnector } from "../connectors/excel";
 import { GenericConnector } from "../connectors/generic";
 import { journalRepo, saveRawUploadToArchive } from "../journal";
 import { getSpaceAlertSettings } from "../notify/index";
+import { formatApiError, validateExternalEndpointUrl } from "../security";
 import {
   createUserSpace,
   listAuthorizedSpaces,
   requirePermission,
   resolveContextForUser,
-  TenantIsolationError,
   tenantSpacesRegistry,
 } from "../tenant";
 
@@ -43,9 +43,16 @@ export function sendJson(res: ServerResponse, status: number, body: unknown) {
 }
 
 export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const MAX_BYTES = 10 * 1024 * 1024;
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buf.length;
+    if (totalBytes > MAX_BYTES) {
+      throw new Error("Corps de requête trop volumineux (limite 10 Mo dépassée).");
+    }
+    chunks.push(buf);
   }
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   return raw ? JSON.parse(raw) : {};
@@ -198,6 +205,9 @@ export async function handleSourcesRoute(
       const body = RegisterSourceSchema.parse(await readJsonBody(req));
       const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
       requirePermission(user, "meal:ingest");
+      if (body.endpointUrl) {
+        validateExternalEndpointUrl(body.endpointUrl);
+      }
       const source = journalRepo.upsertSource(ctx, {
         id: `src-${ctx.spaceId}-${Date.now()}`,
         name: body.name,
@@ -214,10 +224,7 @@ export async function handleSourcesRoute(
 
     return sendJson(res, 405, { message: "Méthode non supportée" });
   } catch (err) {
-    if (err instanceof AuthUnauthorizedError) return sendJson(res, 401, { message: err.message });
-    if (err instanceof TenantIsolationError) return sendJson(res, 403, { message: err.message });
-    return sendJson(res, 400, {
-      message: err instanceof Error ? err.message : "Erreur sources",
-    });
+    const { status, message } = formatApiError(err, "Erreur sources");
+    return sendJson(res, status, { message });
   }
 }

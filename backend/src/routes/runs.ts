@@ -14,11 +14,11 @@ import {
   updateSpaceAlertSettings,
 } from "../notify/index";
 import { generateWeeklySpaceDocxBuffer } from "../reports/weeklyDocx";
+import { formatApiError } from "../security";
 import {
   deriveTenantId,
   listAuthorizedSpaces,
   requirePermission,
-  TenantIsolationError,
 } from "../tenant";
 import { pollApiSourcesAllSpaces, processInboxFilePath, runNightlyCheckAllSpaces } from "../worker";
 import { readJsonBody, resolveHttpContext, sendJson } from "./sources";
@@ -561,8 +561,7 @@ export async function handleRunsRoute(
 
     return sendJson(res, 405, { message: "Méthode non supportée" });
   } catch (err) {
-    if (err instanceof AuthUnauthorizedError) return sendJson(res, 401, { message: err.message });
-    if (err instanceof TenantIsolationError) return sendJson(res, 403, { message: err.message });
-    return sendJson(res, 400, { message: err instanceof Error ? err.message : "Erreur runs" });
+    const { status, message } = formatApiError(err, "Erreur runs");
+    return sendJson(res, status, { message });
   }
 }

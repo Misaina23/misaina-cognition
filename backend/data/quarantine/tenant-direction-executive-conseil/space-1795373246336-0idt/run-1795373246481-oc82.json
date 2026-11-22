@@ -1,0 +1,11 @@
+{
+  "reason": "blocking_anomalies",
+  "count": 1,
+  "anomalies": [
+    {
+      "id": "anom-run-1795373246481-oc82-1",
+      "recordId": "rec-src-space-1795373246336-0idt-csv-1795373246336-7da639ffaf7b-1795373246437-2",
+      "ruleId": "range_age"
+    }
+  ]
+}

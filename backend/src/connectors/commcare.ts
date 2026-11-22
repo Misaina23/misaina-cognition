@@ -1,4 +1,5 @@
 import { journalRepo } from "../journal";
+import { validateExternalEndpointUrl } from "../security";
 import {
   buildNormalizedPair,
   type ConnectorIngestResult,
@@ -140,12 +141,13 @@ export class CommCareConnector implements SourceConnector {
     }
     const baseUrl =
       customEndpoint || `https://www.commcarehq.org/a/${encodeURIComponent(domain)}/api/v0.5/form/`;
-    const url = new URL(baseUrl);
+    const url = validateExternalEndpointUrl(baseUrl);
     url.searchParams.set("limit", String(limit));
     if (sinceDate) url.searchParams.set("received_on_start", sinceDate);
 
     const res = await fetch(url.toString(), {
       headers: { Authorization: `ApiKey ${username}:${apiKey}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`Erreur API CommCare (${res.status})`);
     const payload = (await res.json()) as { objects?: CommCareSubmission[] };

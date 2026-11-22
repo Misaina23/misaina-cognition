@@ -77,6 +77,29 @@ function estimateCostUsd(provider: LlmProviderName, totalTokens: number): number
   return Number(((totalTokens / 1_000_000) * ratePerMillion).toFixed(6));
 }
 
+function isTransientLlmError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || "");
+  return /\b(429|500|502|503|504)\b|RESOURCE_EXHAUSTED|UNAVAILABLE|ECONNRESET|ETIMEDOUT|fetch failed/i.test(
+    msg
+  );
+}
+
+async function withLlmRetry<T>(fn: () => Promise<T>, maxAttempts = 2): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt + 1 >= maxAttempts || !isTransientLlmError(err)) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastErr;
+}
+
 function toGeminiSchema(prop: LlmToolParameterProperty): Schema {
   const typeMap: Record<LlmToolParameterProperty["type"], Type> = {
     string: Type.STRING,
@@ -171,16 +194,18 @@ export class GeminiProvider implements LlmProvider {
         : undefined;
     const responseSchema = rawSchemaProps ? toGeminiSchema(rawSchemaProps) : undefined;
 
-    const resp = await this.client.models.generateContent({
-      model: this.modelName,
-      contents,
-      config: {
-        systemInstruction: params.system,
-        ...(functionDeclarations ? { tools: [{ functionDeclarations }] } : {}),
-        ...(params.schema ? { responseMimeType: "application/json" } : {}),
-        ...(responseSchema ? { responseSchema } : {}),
-      },
-    });
+    const resp = await withLlmRetry(() =>
+      this.client.models.generateContent({
+        model: this.modelName,
+        contents,
+        config: {
+          systemInstruction: params.system,
+          ...(functionDeclarations ? { tools: [{ functionDeclarations }] } : {}),
+          ...(params.schema ? { responseMimeType: "application/json" } : {}),
+          ...(responseSchema ? { responseSchema } : {}),
+        },
+      })
+    );
 
     const estInput = Math.max(1, Math.ceil(JSON.stringify(params.messages).length / 4));
     const estOutput = Math.max(1, Math.ceil((resp.text || "").length / 4));
@@ -255,19 +280,22 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       },
     }));
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: this.modelName,
-        messages,
-        ...(tools?.length ? { tools } : {}),
-        ...(params.schema ? { response_format: { type: "json_object" } } : {}),
-      }),
-    });
+    const res = await withLlmRetry(() =>
+      fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.modelName,
+          messages,
+          ...(tools?.length ? { tools } : {}),
+          ...(params.schema ? { response_format: { type: "json_object" } } : {}),
+        }),
+        signal: AbortSignal.timeout(25000),
+      })
+    );
     if (!res.ok) throw new Error(`Erreur fournisseur OpenAI (${res.status})`);
     const data = (await res.json()) as {
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
@@ -355,21 +383,24 @@ export class AnthropicProvider implements LlmProvider {
       input_schema: t.parameters,
     }));
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: this.modelName,
-        max_tokens: 1024,
-        system: params.system,
-        messages,
-        ...(tools?.length ? { tools } : {}),
-      }),
-    });
+    const res = await withLlmRetry(() =>
+      fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.modelName,
+          max_tokens: 1024,
+          system: params.system,
+          messages,
+          ...(tools?.length ? { tools } : {}),
+        }),
+        signal: AbortSignal.timeout(25000),
+      })
+    );
     if (!res.ok) throw new Error(`Erreur fournisseur Anthropic (${res.status})`);
 
     const data = (await res.json()) as {

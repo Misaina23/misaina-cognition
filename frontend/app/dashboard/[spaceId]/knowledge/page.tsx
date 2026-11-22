@@ -21,11 +21,15 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { KpiStripSkeleton } from "@/components/Skeletons";
 import { SpaceHeader } from "@/components/SpaceHeader";
+import { ToastBanner, type BannerMessage } from "@/components/ToastBanner";
 import {
   describeApiError,
   guardianApi,
   isUnauthorizedError,
+  type AuditChainVerificationResult,
   type AuditLedgerEntry,
   type ClassificationLevel,
   type ComplianceMetrics,
@@ -62,7 +66,7 @@ export default function SovereignKnowledgePage() {
   const [audit, setAudit] = useState<AuditLedgerEntry[]>([]);
   const [compliance, setCompliance] = useState<ComplianceMetrics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [banner, setBanner] = useState<BannerMessage | null>(null);
 
   // RAG Query state
   const [question, setQuestion] = useState("");
@@ -73,7 +77,7 @@ export default function SovereignKnowledgePage() {
   const [proofResults, setProofResults] = useState<Record<string, ProofVerificationResult>>({});
   const [verifyingKey, setVerifyingKey] = useState<string | null>(null);
 
-  // Vault Document Ingestion state
+  // Vault Document Ingestion & Filter state
   const [docTitle, setDocTitle] = useState("");
   const [docFileName, setDocFileName] = useState("directive_interne.txt");
   const [docDept, setDocDept] = useState("Direction Technique & PSSI");
@@ -81,7 +85,16 @@ export default function SovereignKnowledgePage() {
   const [docContent, setDocContent] = useState("");
   const [ingesting, setIngesting] = useState(false);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
+  const [vaultSearch, setVaultSearch] = useState("");
+  const [vaultClassFilter, setVaultClassFilter] = useState<ClassificationLevel | "ALL">("ALL");
+  const [pendingDeleteDoc, setPendingDeleteDoc] = useState<KnowledgeDocument | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // Audit Chain Integrity Verifier state
+  const [verifyingChain, setVerifyingChain] = useState(false);
+  const [chainVerification, setChainVerification] =
+    useState<AuditChainVerificationResult | null>(null);
 
   const refresh = useCallback(async () => {
     if (!spaceId) return;
@@ -95,9 +108,7 @@ export default function SovereignKnowledgePage() {
       setDocuments(docsRes.documents || []);
       const qList = queriesRes.queries || [];
       setQueries(qList);
-      if (qList.length > 0 && !activeResult) {
-        setActiveResult(qList[0]);
-      }
+      setActiveResult((prev) => prev ?? qList[0] ?? null);
       setAudit(auditRes.audit || []);
       setCompliance(auditRes.compliance || null);
     } catch (err) {
@@ -109,7 +120,7 @@ export default function SovereignKnowledgePage() {
     } finally {
       setLoading(false);
     }
-  }, [activeResult, router, spaceId]);
+  }, [router, spaceId]);
 
   useEffect(() => {
     void refresh();
@@ -263,9 +274,11 @@ export default function SovereignKnowledgePage() {
   }
 
   async function handleDeleteDocument(doc: KnowledgeDocument) {
+    setDeletingDoc(true);
     setBanner(null);
     try {
       await guardianApi.deleteKnowledgeDocument(spaceId, doc.id);
+      setPendingDeleteDoc(null);
       await refresh();
       setBanner({ kind: "ok", text: `Document retiré du coffre (${doc.title}).` });
     } catch (err) {
@@ -274,8 +287,38 @@ export default function SovereignKnowledgePage() {
         return;
       }
       setBanner({ kind: "err", text: describeApiError(err) });
+    } finally {
+      setDeletingDoc(false);
     }
   }
+
+  async function handleVerifyAuditChain() {
+    setVerifyingChain(true);
+    setBanner(null);
+    try {
+      const result = await guardianApi.verifyAuditChain(spaceId);
+      setChainVerification(result);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+        return;
+      }
+      setBanner({ kind: "err", text: describeApiError(err) });
+    } finally {
+      setVerifyingChain(false);
+    }
+  }
+
+  const filteredVaultDocuments = documents.filter((d) => {
+    if (vaultClassFilter !== "ALL" && d.classification !== vaultClassFilter) return false;
+    const q = vaultSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      d.title.toLowerCase().includes(q) ||
+      d.fileName.toLowerCase().includes(q) ||
+      d.department.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -291,26 +334,19 @@ export default function SovereignKnowledgePage() {
             className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
             aria-label="Actualiser le moteur de connaissance"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </button>
         }
       />
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        {banner && (
-          <div
-            className={`rounded-xl border px-4 py-3 text-xs font-medium ${
-              banner.kind === "err"
-                ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
-                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            }`}
-          >
-            {banner.text}
-          </div>
-        )}
+        <ToastBanner banner={banner} onDismiss={() => setBanner(null)} />
 
         {/* Compliance & Telemetry Strip */}
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {loading && documents.length === 0 ? (
+          <KpiStripSkeleton count={4} />
+        ) : (
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-border bg-card p-4 space-y-1 shadow-sm">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Documents scellés</span>
@@ -364,6 +400,7 @@ export default function SovereignKnowledgePage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* Sub-navigation tabs */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
@@ -497,6 +534,12 @@ export default function SovereignKnowledgePage() {
                         {exportingDocx ? "Export…" : "Exporter note .docx certifiée"}
                       </button>
                     </div>
+
+                    {activeResult.llmFallbackReason && (
+                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                        Synthèse générée en mode déterministe de repli : {activeResult.llmFallbackReason}
+                      </div>
+                    )}
 
                     <div className="space-y-3 text-sm leading-relaxed text-foreground">
                       <Markdown>{activeResult.answer}</Markdown>
@@ -777,75 +820,111 @@ export default function SovereignKnowledgePage() {
             </form>
 
             <div className="lg:col-span-7 space-y-3">
-              {documents.map((doc) => {
-                const isExpanded = expandedDocId === doc.id;
-                return (
-                  <div
-                    key={doc.id}
-                    className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="font-semibold text-foreground text-sm">
-                            {doc.title}
-                          </span>
-                          <span className="font-mono text-[11px] text-primary">
-                            {doc.classification}
-                          </span>
-                        </div>
-                        <p className="font-mono text-[11px] text-muted-foreground">
-                          {doc.fileName} · {doc.department} · {doc.chunks.length} fragments ·{" "}
-                          {doc.sizeBytes} octets · v{doc.version}
-                        </p>
-                      </div>
+              <div className="rounded-xl border border-border bg-card p-3.5 shadow-sm flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search
+                    size={13}
+                    className="pointer-events-none absolute left-2.5 top-2.5 text-muted-foreground"
+                  />
+                  <input
+                    type="text"
+                    value={vaultSearch}
+                    onChange={(e) => setVaultSearch(e.target.value)}
+                    placeholder="Rechercher un document, fichier ou direction…"
+                    className="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary"
+                  />
+                </div>
+                <select
+                  aria-label="Filtrer par classification PSSI"
+                  value={vaultClassFilter}
+                  onChange={(e) =>
+                    setVaultClassFilter(e.target.value as ClassificationLevel | "ALL")
+                  }
+                  className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+                >
+                  <option value="ALL">Toutes classifications ({documents.length})</option>
+                  <option value="CONFIDENTIEL">CONFIDENTIEL</option>
+                  <option value="RESTREINT">RESTREINT</option>
+                  <option value="INTERNE">INTERNE</option>
+                  <option value="PUBLIC">PUBLIC</option>
+                </select>
+              </div>
 
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted"
-                        >
-                          {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          Fragments
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteDocument(doc)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-[11px] font-medium text-red-700 dark:text-red-400 hover:bg-red-500/20"
-                          title="Retirer du coffre"
-                        >
-                          <Trash2 size={13} /> Retirer
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border border-border bg-background/60 p-3 font-mono text-[10px] text-muted-foreground space-y-1 break-all">
-                      <div>Document SHA-256 : {doc.documentHash}</div>
-                      <div>Racine Merkle : {doc.merkleRoot}</div>
-                    </div>
-
-                    {isExpanded && (
-                      <div className="space-y-2 border-t border-border pt-3">
-                        {doc.chunks.map((ch) => (
-                          <div
-                            key={ch.id}
-                            className="rounded-lg border border-border bg-background p-3 text-xs space-y-1"
-                          >
-                            <div className="flex items-center justify-between font-mono text-[10px] text-muted-foreground">
-                              <span>
-                                Fragment #{ch.chunkIndex + 1} · Page {ch.pageNumber}
-                              </span>
-                              <span>SHA-256 : {ch.chunkHash.slice(0, 18)}...</span>
-                            </div>
-                            <p className="text-foreground leading-relaxed">{ch.content}</p>
+              {filteredVaultDocuments.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-card p-6 text-center text-xs text-muted-foreground">
+                  Aucun document indexé ne correspond à ces critères.
+                </div>
+              ) : (
+                filteredVaultDocuments.map((doc) => {
+                  const isExpanded = expandedDocId === doc.id;
+                  return (
+                    <div
+                      key={doc.id}
+                      className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className="font-semibold text-foreground text-sm">
+                              {doc.title}
+                            </span>
+                            <span className="font-mono text-[11px] text-primary">
+                              {doc.classification}
+                            </span>
                           </div>
-                        ))}
+                          <p className="font-mono text-[11px] text-muted-foreground">
+                            {doc.fileName} · {doc.department} · {doc.chunks.length} fragments ·{" "}
+                            {doc.sizeBytes} octets · v{doc.version}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted"
+                          >
+                            {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                            Fragments
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteDoc(doc)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-[11px] font-medium text-red-700 dark:text-red-400 hover:bg-red-500/20"
+                            title="Retirer du coffre"
+                          >
+                            <Trash2 size={13} /> Retirer
+                          </button>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+
+                      <div className="rounded-lg border border-border bg-background/60 p-3 font-mono text-[10px] text-muted-foreground space-y-1 break-all">
+                        <div>Document SHA-256 : {doc.documentHash}</div>
+                        <div>Racine Merkle : {doc.merkleRoot}</div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="space-y-2 border-t border-border pt-3">
+                          {doc.chunks.map((ch) => (
+                            <div
+                              key={ch.id}
+                              className="rounded-lg border border-border bg-background p-3 text-xs space-y-1"
+                            >
+                              <div className="flex items-center justify-between font-mono text-[10px] text-muted-foreground">
+                                <span>
+                                  Fragment #{ch.chunkIndex + 1} · Page {ch.pageNumber}
+                                </span>
+                                <span>SHA-256 : {ch.chunkHash.slice(0, 18)}...</span>
+                              </div>
+                              <p className="text-foreground leading-relaxed">{ch.content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}
@@ -873,13 +952,47 @@ export default function SovereignKnowledgePage() {
             )}
 
             <section className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">
-                  Registre d&apos;Audit Immuable Chaîné SHA-256 ({audit.length})
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Chaque événement scelle le condensat de l&apos;événement précédent pour prévenir toute falsification du journal de conformité.
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    Registre d&apos;Audit Immuable Chaîné SHA-256 ({audit.length})
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    Chaque événement scelle le condensat de l&apos;événement précédent pour prévenir toute falsification du journal de conformité.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {chainVerification && (
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-[11px] font-semibold ${
+                        chainVerification.intact
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+                      }`}
+                    >
+                      {chainVerification.intact ? (
+                        <CheckCircle2 size={13} />
+                      ) : (
+                        <ShieldAlert size={13} />
+                      )}
+                      {chainVerification.intact
+                        ? `Chaîne SHA-256 intègre · ${chainVerification.verifiedLinks}/${chainVerification.totalEntries} maillons`
+                        : `Rupture détectée (${chainVerification.brokenAtId})`}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={verifyingChain}
+                    onClick={() => void handleVerifyAuditChain()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50 whitespace-nowrap shrink-0"
+                  >
+                    <FileCheck2 size={13} />
+                    {verifyingChain
+                      ? "Vérification en cours…"
+                      : "Vérifier l'intégrité de la chaîne"}
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -932,6 +1045,25 @@ export default function SovereignKnowledgePage() {
           </div>
         )}
       </main>
+
+      <ConfirmDialog
+        open={Boolean(pendingDeleteDoc)}
+        title="Retirer ce document du coffre souverain ?"
+        description={
+          pendingDeleteDoc
+            ? `Le document "${pendingDeleteDoc.title}" et ses ${pendingDeleteDoc.chunks.length} fragments indexés seront retirés de l'index RAG. Cette suppression sera journalisée dans le registre SHA-256.`
+            : ""
+        }
+        confirmLabel="Retirer du coffre"
+        variant="danger"
+        busy={deletingDoc}
+        onCancel={() => setPendingDeleteDoc(null)}
+        onConfirm={() => {
+          if (pendingDeleteDoc) {
+            return handleDeleteDocument(pendingDeleteDoc);
+          }
+        }}
+      />
     </div>
   );
 }

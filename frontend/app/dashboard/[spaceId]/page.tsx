@@ -9,9 +9,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  Clock,
   Copy,
-  Cpu,
   Database,
   FileCode2,
   FileDown,
@@ -28,12 +26,17 @@ import {
   RefreshCw,
   RotateCcw,
   Send,
-  ShieldAlert,
   Upload,
   Users,
   XCircle,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PipelineMetricsStrip } from "@/components/dashboard/PipelineMetricsStrip";
+import { RecordsExplorer } from "@/components/dashboard/RecordsExplorer";
+import { SystemDiagnosticsCard } from "@/components/dashboard/SystemDiagnosticsCard";
+import { DashboardSkeleton } from "@/components/Skeletons";
 import { SpaceHeader } from "@/components/SpaceHeader";
+import { ToastBanner, type BannerMessage } from "@/components/ToastBanner";
 import {
   describeApiError,
   guardianApi,
@@ -169,8 +172,9 @@ export default function DashboardSpacePage() {
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
+  const [confirmRollbackId, setConfirmRollbackId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [banner, setBanner] = useState<BannerMessage | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -313,6 +317,7 @@ export default function DashboardSpacePage() {
     setBanner(null);
     try {
       await guardianApi.rollbackAction(spaceId, actionId);
+      setConfirmRollbackId(null);
       await refresh();
       setBanner({
         kind: "ok",
@@ -544,7 +549,7 @@ export default function DashboardSpacePage() {
               type="button"
               onClick={() => void handleRun("agent")}
               disabled={runningMode !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               <Play size={13} />
               {runningMode === "agent" ? "Contrôle en cours…" : "Lancer contrôle Agent IA"}
@@ -553,7 +558,7 @@ export default function DashboardSpacePage() {
               type="button"
               onClick={() => void handleDownloadCleanCsv()}
               disabled={downloadingCsv || records.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               <FileSpreadsheet size={13} />
               {downloadingCsv ? "Export CSV…" : "Exporter CSV propre"}
@@ -562,7 +567,7 @@ export default function DashboardSpacePage() {
               type="button"
               onClick={() => void handleDownloadWeeklyDocx()}
               disabled={downloadingDocx}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               <FileDown size={13} />
               {downloadingDocx ? "Export…" : "Rapport .docx"}
@@ -570,137 +575,76 @@ export default function DashboardSpacePage() {
             <button
               type="button"
               onClick={() => void refresh()}
-              className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground hover:text-foreground shrink-0"
               aria-label="Actualiser"
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
             </button>
           </>
         }
       />
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        {banner && (
-          <div
-            className={`rounded-xl border px-4 py-3 text-xs font-medium ${
-              banner.kind === "err"
-                ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
-                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            }`}
-          >
-            {banner.text}
-          </div>
-        )}
+        <ToastBanner banner={banner} onDismiss={() => setBanner(null)} />
 
-        {/* Architecture 5 Piliers */}
-        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
-              <span>01 · Déclencheur</span>
-              <Clock size={14} />
-            </div>
-            <div className="text-xl font-bold font-mono tabular-nums">
-              {runs.length} run(s)
-            </div>
-            <p className="text-[11px] text-muted-foreground font-mono">
-              Cron {automation?.nightlyCron || "0 2 * * *"} · Webhook prêt
-            </p>
-          </div>
+        {loading && runs.length === 0 && records.length === 0 ? (
+          <DashboardSkeleton />
+        ) : (
+          <>
+            <PipelineMetricsStrip
+              runsCount={runs.length}
+              nightlyCron={automation?.nightlyCron}
+              recordsCount={records.length}
+              totalLlmCalls={totalLlmCalls}
+              totalTokens={totalTokens}
+              anomaliesCount={anomalies.length}
+              severityCounts={severityCounts}
+              emailSummariesCount={emailSummaries.length}
+              actionsCount={actions.length}
+            />
 
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
-              <span>02 · Données</span>
-              <Database size={14} />
-            </div>
-            <div className="text-xl font-bold font-mono tabular-nums">
-              {records.length} fiche(s)
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              CommCare / Kobo / CSV (bruts immuables)
-            </p>
-          </div>
+            <SystemDiagnosticsCard />
 
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
-              <span>03 · Agent IA</span>
-              <Cpu size={14} />
+            {/* Onglets de travail */}
+            <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
+              <button
+                type="button"
+                onClick={() => setTab("agent_pipeline")}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  tab === "agent_pipeline"
+                    ? "bg-foreground text-background"
+                    : "border border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Activity size={13} /> Pilotage Qualité, Email &amp; Journal
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("data_sources")}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  tab === "data_sources"
+                    ? "bg-foreground text-background"
+                    : "border border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Database size={13} /> Collectes, Webhooks &amp; NLQ ({records.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("rules")}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  tab === "rules"
+                    ? "bg-foreground text-background"
+                    : "border border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <FileCode2 size={13} /> Règles YAML &amp; Calibration
+                {ruleSuggestions.length > 0 ? ` (${ruleSuggestions.length})` : ""}
+              </button>
             </div>
-            <div className="text-xl font-bold font-mono tabular-nums">
-              {totalLlmCalls} appel(s) LLM
-            </div>
-            <p className="text-[11px] text-muted-foreground font-mono">
-              Script YAML + Tool Use · {totalTokens} tok
-            </p>
-          </div>
 
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
-              <span>04 · Résultat</span>
-              <Mail size={14} />
-            </div>
-            <div className="text-xl font-bold font-mono tabular-nums">
-              {anomalies.length} anomalie(s)
-            </div>
-            <p className="text-[11px] text-muted-foreground font-mono">
-              {severityCounts.bloquante} bloq · {severityCounts.a_verifier} vérif ·{" "}
-              {emailSummaries.length} email(s)
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
-              <span>05 · Journal</span>
-              <ShieldAlert size={14} />
-            </div>
-            <div className="text-xl font-bold font-mono tabular-nums">
-              {actions.length} action(s)
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              Table agent_actions (anti-dérapage)
-            </p>
-          </div>
-        </section>
-
-        {/* Onglets de travail */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
-          <button
-            type="button"
-            onClick={() => setTab("agent_pipeline")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              tab === "agent_pipeline"
-                ? "bg-foreground text-background"
-                : "border border-border bg-card text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Activity size={13} /> Pilotage Qualité, Email &amp; Journal
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("data_sources")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              tab === "data_sources"
-                ? "bg-foreground text-background"
-                : "border border-border bg-card text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Database size={13} /> Collectes, Webhooks &amp; NLQ ({records.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("rules")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              tab === "rules"
-                ? "bg-foreground text-background"
-                : "border border-border bg-card text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <FileCode2 size={13} /> Règles YAML &amp; Calibration
-            {ruleSuggestions.length > 0 ? ` (${ruleSuggestions.length})` : ""}
-          </button>
-        </div>
-
-        {/* ONGLET 1 : Pilotage Qualité, Validations inline, Enquêteurs, Email, Journal */}
-        {tab === "agent_pipeline" && (
+            {/* ONGLET 1 : Pilotage Qualité, Validations inline, Enquêteurs, Email, Journal */}
+            {tab === "agent_pipeline" && (
           <div className="space-y-6">
             {records.length === 0 && !loading && (
               <section className="rounded-2xl border border-primary/30 bg-primary/5 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1084,7 +1028,7 @@ export default function DashboardSpacePage() {
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">
-                    Journal des Actions de l&apos;Agent (agent_actions — Détection des dérapages)
+                    Journal des Actions de l&apos;Agent (Détection des dérapages)
                   </h2>
                   <p className="text-xs text-muted-foreground">
                     Chaque appel d&apos;outil, requête LLM, fusion, garde-fou et notification est
@@ -1145,7 +1089,7 @@ export default function DashboardSpacePage() {
                               <button
                                 type="button"
                                 disabled={revertingId === act.id}
-                                onClick={() => void handleRollback(act.id)}
+                                onClick={() => setConfirmRollbackId(act.id)}
                                 className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
                               >
                                 <RotateCcw size={11} />
@@ -1239,7 +1183,7 @@ export default function DashboardSpacePage() {
                     <Bot size={13} />
                     {runningMode === "demo_kobo_ingest"
                       ? "Injection…"
-                      : "Simuler export CommCare/Kobo"}
+                      : "Importer un jeu de données terrain Kobo"}
                   </button>
                   <button
                     type="button"
@@ -1248,7 +1192,7 @@ export default function DashboardSpacePage() {
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50"
                   >
                     <FolderInput size={13} />
-                    {runningMode === "inbox_drop" ? "Dépôt…" : "Tester dépôt Inbox"}
+                    {runningMode === "inbox_drop" ? "Dépôt…" : "Tester l'ingestion dossier Inbox"}
                   </button>
                   <button
                     type="button"
@@ -1589,59 +1533,12 @@ export default function DashboardSpacePage() {
               )}
             </section>
 
-            {/* Enregistrements normalisés */}
-            <section className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">
-                  Enregistrements normalisés ({records.length} — aucune suppression physique)
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => void handleDownloadCleanCsv()}
-                  disabled={downloadingCsv || records.length === 0}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-                >
-                  <FileSpreadsheet size={12} /> Télécharger base nettoyée (.csv)
-                </button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
-                    <tr>
-                      <th className="py-2 pr-3">ID externe</th>
-                      <th className="py-2 pr-3">Nom complet</th>
-                      <th className="py-2 pr-3">Enquêteur</th>
-                      <th className="py-2 pr-3">Téléphone</th>
-                      <th className="py-2 pr-3">Âge</th>
-                      <th className="py-2 pr-3">GPS / Zone</th>
-                      <th className="py-2">Statut</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {records.slice(0, 100).map((rec) => (
-                      <tr key={rec.id}>
-                        <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">
-                          {rec.externalId}
-                        </td>
-                        <td className="py-2 pr-3 font-medium">{rec.fullName || "—"}</td>
-                        <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">
-                          {rec.enumeratorId || "—"}
-                        </td>
-                        <td className="py-2 pr-3 font-mono text-[11px]">{rec.phone || "—"}</td>
-                        <td className="py-2 pr-3 font-mono text-[11px]">{rec.age ?? "—"}</td>
-                        <td className="py-2 pr-3 font-mono text-[11px]">
-                          {rec.zone || "—"}
-                          {rec.latitude !== null && rec.longitude !== null
-                            ? ` (${rec.latitude.toFixed(3)}, ${rec.longitude.toFixed(3)})`
-                            : ""}
-                        </td>
-                        <td className="py-2 font-mono text-[11px]">{rec.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <RecordsExplorer
+              records={records}
+              anomalies={anomalies}
+              downloadingCsv={downloadingCsv}
+              onDownloadCleanCsv={() => void handleDownloadCleanCsv()}
+            />
           </div>
         )}
 
@@ -1840,7 +1737,24 @@ export default function DashboardSpacePage() {
             )}
           </div>
         )}
+          </>
+        )}
       </main>
+
+      <ConfirmDialog
+        open={Boolean(confirmRollbackId)}
+        title="Confirmer l'annulation (Rollback)"
+        description="Cette opération restaure l'état antérieur des enregistrements concernés par cette action et journalise le rollback dans l'historique d'audit."
+        confirmLabel="Confirmer le rollback"
+        variant="warning"
+        busy={Boolean(revertingId)}
+        onCancel={() => setConfirmRollbackId(null)}
+        onConfirm={() => {
+          if (confirmRollbackId) {
+            return handleRollback(confirmRollbackId);
+          }
+        }}
+      />
     </div>
   );
 }

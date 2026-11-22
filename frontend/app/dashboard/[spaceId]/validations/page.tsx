@@ -1,9 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, Check, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { CardsListSkeleton } from "@/components/Skeletons";
 import { SpaceHeader } from "@/components/SpaceHeader";
+import { ToastBanner, type BannerMessage } from "@/components/ToastBanner";
 import {
   describeApiError,
   guardianApi,
@@ -17,12 +20,13 @@ export default function ValidationsPage() {
   const router = useRouter();
   const params = useParams<{ spaceId: string }>();
   const spaceId = decodeURIComponent(params.spaceId || "");
+  const encodedSpaceId = encodeURIComponent(spaceId);
 
   const [items, setItems] = useState<ValidationItem[]>([]);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [banner, setBanner] = useState<BannerMessage | null>(null);
 
   const refresh = useCallback(async () => {
     if (!spaceId) return;
@@ -90,23 +94,13 @@ export default function ValidationsPage() {
             className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
             aria-label="Actualiser les validations"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </button>
         }
       />
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        {banner && (
-          <div
-            className={`rounded-xl border px-4 py-3 text-xs font-medium ${
-              banner.kind === "err"
-                ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
-                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            }`}
-          >
-            {banner.text}
-          </div>
-        )}
+        <ToastBanner banner={banner} onDismiss={() => setBanner(null)} />
 
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -129,7 +123,7 @@ export default function ValidationsPage() {
                 key={opt.key}
                 type="button"
                 onClick={() => setFilter(opt.key)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                   filter === opt.key
                     ? "bg-foreground text-background"
                     : "border border-border bg-card text-muted-foreground hover:text-foreground"
@@ -141,13 +135,19 @@ export default function ValidationsPage() {
           </div>
         </div>
 
-        {loading ? (
-          <div className="rounded-xl border border-border bg-card p-6 text-xs text-muted-foreground">
-            Chargement de la file de validation…
-          </div>
+        {loading && items.length === 0 ? (
+          <CardsListSkeleton count={3} />
         ) : filtered.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card p-6 text-xs text-muted-foreground">
-            Aucun dossier de validation pour ce filtre.
+          <div className="rounded-xl border border-border bg-card p-8 text-center space-y-3 shadow-sm">
+            <p className="text-xs text-muted-foreground">
+              Aucun dossier de validation pour ce filtre.
+            </p>
+            <Link
+              href={`/dashboard/${encodedSpaceId}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3.5 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            >
+              <ArrowLeft size={13} /> Retourner au pilotage qualité &amp; déclenchement Agent
+            </Link>
           </div>
         ) : (
           <div className="space-y-3">
@@ -160,7 +160,7 @@ export default function ValidationsPage() {
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="font-semibold text-foreground text-sm">{item.title}</span>
                     <span className="font-mono text-[11px] text-primary">{item.actionType}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground">
+                    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
                       Confiance {(item.confidence * 100).toFixed(0)} %
                     </span>
                   </div>

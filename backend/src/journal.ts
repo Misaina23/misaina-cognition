@@ -14,7 +14,6 @@ import type {
   ValidationItem,
 } from "./connectors/types";
 import { parseProjectRulesYaml, type ProjectRulesConfig } from "./rules/engine";
-import { applyPgUsersSnapshot, getSeedUsersWithHashes } from "./auth";
 import { tenantSpacesRegistry } from "./tenant";
 import {
   enqueuePgTask,
@@ -267,47 +266,34 @@ export function moveInboxFile(
   return dest;
 }
 
-let journalReadyPromise: Promise<void> | undefined;
-
 export const journalRepo = {
   async ensureReady(): Promise<void> {
     if (journalPgHydrated || !isPgEnabled()) {
       hydrateStateOnce();
       return;
     }
-    if (!journalReadyPromise) {
-      journalReadyPromise = (async () => {
-        const snap = await initAndHydrateFromPg({
-          spaces: tenantSpacesRegistry,
-          sources: state.sources,
-          users: getSeedUsersWithHashes(),
-        });
-        if (snap) {
-          if (snap.spaces.length > 0) {
-            tenantSpacesRegistry.splice(0, tenantSpacesRegistry.length, ...snap.spaces);
-          }
-          if (snap.users && snap.users.length > 0) {
-            applyPgUsersSnapshot(snap.users);
-          }
-          state.sources = snap.sources;
-          state.rawRecords = snap.rawRecords.map((r) =>
-            Object.freeze({ ...r, rawPayload: deepFreeze({ ...r.rawPayload }) })
-          );
-          state.normalizedRecords = snap.normalizedRecords;
-          state.rulesYamlBySpace = new Map(snap.rulesYaml);
-          state.runs = snap.runs;
-          state.anomalies = snap.anomalies;
-          state.validationQueue = snap.validations;
-          state.agentActions = snap.agentActions;
-          state.ruleFeedback = snap.ruleFeedback || [];
-          journalPgHydrated = true;
-          journalHydrated = true;
-        }
-      })().finally(() => {
-        journalReadyPromise = undefined;
-      });
+    const snap = await initAndHydrateFromPg({
+      spaces: tenantSpacesRegistry,
+      sources: state.sources,
+    });
+    if (snap) {
+      if (snap.spaces.length > 0) {
+        tenantSpacesRegistry.splice(0, tenantSpacesRegistry.length, ...snap.spaces);
+      }
+      state.sources = snap.sources;
+      state.rawRecords = snap.rawRecords.map((r) =>
+        Object.freeze({ ...r, rawPayload: deepFreeze({ ...r.rawPayload }) })
+      );
+      state.normalizedRecords = snap.normalizedRecords;
+      state.rulesYamlBySpace = new Map(snap.rulesYaml);
+      state.runs = snap.runs;
+      state.anomalies = snap.anomalies;
+      state.validationQueue = snap.validations;
+      state.agentActions = snap.agentActions;
+      state.ruleFeedback = snap.ruleFeedback || [];
+      journalPgHydrated = true;
+      journalHydrated = true;
     }
-    await journalReadyPromise;
   },
 
   async flushPg(): Promise<void> {

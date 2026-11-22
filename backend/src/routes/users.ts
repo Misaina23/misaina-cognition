@@ -3,19 +3,18 @@ import { z } from "zod";
 import {
   approveOrRejectPendingAccount,
   authenticateRequest,
-  AuthUnauthorizedError,
   createValidatedAccountByAdmin,
   listManageableUsers,
   updateAccountPermissions,
 } from "../auth";
 import { journalRepo } from "../journal";
+import { formatApiError } from "../security";
 import {
   ALL_PERMISSIONS,
   PERMISSION_LABELS,
   requirePermission,
   ROLE_PERMISSION_PRESETS,
   tenantSpacesRegistry,
-  TenantIsolationError,
   type Permission,
   type UserRole,
 } from "../tenant";
@@ -121,10 +120,7 @@ export async function handleUsersRoute(
 
     return sendJson(res, 405, { message: "Méthode non supportée" });
   } catch (err) {
-    if (err instanceof AuthUnauthorizedError) return sendJson(res, 401, { message: err.message });
-    if (err instanceof TenantIsolationError) return sendJson(res, 403, { message: err.message });
-    const msg = err instanceof Error ? err.message : "Erreur gestion utilisateurs";
-    const status = msg.includes("existe déjà") ? 409 : 400;
-    return sendJson(res, status, { message: msg });
+    const { status, message } = formatApiError(err, "Erreur gestion utilisateurs");
+    return sendJson(res, status, { message });
   }
 }

@@ -621,6 +621,16 @@ export const guardianApi = {
         payload
       )
       .then((r) => r.data),
+
+  getEnterpriseLeads: () =>
+    api.get<{ leads: EnterpriseLeadRequest[] }>("/contact/enterprise").then((r) => r.data),
+
+  verifyAuditChain: (spaceId: string) =>
+    api
+      .post<AuditChainVerificationResult>("/knowledge/verify-audit-chain", { spaceId })
+      .then((r) => r.data),
+
+  getHealth: () => api.get<HealthStatus>("/health").then((r) => r.data),
 };
 
 export type ClassificationLevel = "PUBLIC" | "INTERNE" | "RESTREINT" | "CONFIDENTIEL";
@@ -682,6 +692,7 @@ export interface KnowledgeQueryResult {
   totalLatencyMs: number;
   llmProvider: string;
   llmModel: string;
+  llmFallbackReason?: string;
   tenantId: string;
   spaceId: string;
   clearanceApplied: string;
@@ -696,6 +707,36 @@ export interface ProofVerificationResult {
   classification?: ClassificationLevel;
   chunkHash: string;
   verifiedAt: string;
+}
+
+export interface AuditChainVerificationResult {
+  intact: boolean;
+  totalEntries: number;
+  verifiedLinks: number;
+  brokenAtId?: string;
+  reason?: string;
+  verifiedAt: string;
+}
+
+export interface EnterpriseLeadRequest {
+  id: string;
+  organization: string;
+  contactName: string;
+  email: string;
+  employeeCount: string;
+  deploymentMode: "SecNumCloud" | "On-Premise" | "Hybride";
+  message: string;
+  createdAt: string;
+}
+
+export interface HealthStatus {
+  status: "ok" | "error";
+  service: string;
+  storage: string;
+  llmProvider: string;
+  llmModel: string;
+  uptimeSec: number;
+  timestamp: string;
 }
 
 export interface AuditLedgerEntry {
