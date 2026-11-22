@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, FolderKanban, LogOut, Plus, ShieldAlert, UserCheck } from "lucide-react";
+import { ArrowRight, FolderKanban, LogOut, Plus, RefreshCw, ShieldAlert, UserCheck } from "lucide-react";
 import {
+  describeApiError,
   guardianApi,
   isUnauthorizedError,
   type AuthUser,
@@ -33,7 +34,7 @@ export default function HomeSpacesPage() {
         router.replace("/login");
         return;
       }
-      setError("Impossible de vérifier la session ou de charger les espaces.");
+      setError(`Impossible de vérifier la session ou de charger les espaces. (${describeApiError(err)})`);
     } finally {
       setLoading(false);
     }
@@ -117,8 +118,24 @@ export default function HomeSpacesPage() {
       </header>
 
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-700">
-          {error}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-700">
+          <span>{error}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void loadSessionAndSpaces()}
+              disabled={loading}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-500/30 bg-background px-2.5 py-1 font-medium text-red-700 hover:bg-red-500/10 disabled:opacity-50"
+            >
+              <RefreshCw size={12} /> Réessayer
+            </button>
+            <Link
+              href="/login"
+              className="inline-flex items-center rounded-lg bg-primary px-2.5 py-1 font-medium text-primary-foreground"
+            >
+              Connexion
+            </Link>
+          </div>
         </div>
       )}
 

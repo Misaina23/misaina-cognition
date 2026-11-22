@@ -32,7 +32,7 @@ export async function handleAuthRoute(
         return sendJson(res, 401, { message: "Identifiants invalides." });
       }
       const token = signSessionJwt(user);
-      res.setHeader("Set-Cookie", buildSessionCookieHeader(token));
+      res.setHeader("Set-Cookie", buildSessionCookieHeader(token, undefined, req));
       return sendJson(res, 200, {
         user,
         token,
@@ -41,7 +41,7 @@ export async function handleAuthRoute(
     }
 
     if (url.pathname === "/api/auth/logout" && req.method === "POST") {
-      res.setHeader("Set-Cookie", buildClearSessionCookieHeader());
+      res.setHeader("Set-Cookie", buildClearSessionCookieHeader(req));
       return sendJson(res, 200, { loggedOut: true });
     }
 

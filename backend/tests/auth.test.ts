@@ -75,8 +75,23 @@ async function main() {
     assert.ok(docxBuf.length > 500);
     assert.equal(docxBuf.subarray(0, 2).toString("utf8"), "PK");
 
+    // 8. Connexion HTTPS cross-origin (Vercel -> Render) : cookie SameSite=None; Secure
+    const httpsLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-Proto": "https",
+        Origin: "https://misaina-cognition.vercel.app",
+      },
+      body: JSON.stringify({ email: "dir.exec@misaina-corp.org", password: "DirExec2026!" }),
+    });
+    assert.equal(httpsLogin.status, 200);
+    const httpsCookie = httpsLogin.headers.get("set-cookie") || "";
+    assert.ok(httpsCookie.includes("SameSite=None"), "Cookie cross-origin HTTPS doit utiliser SameSite=None");
+    assert.ok(httpsCookie.includes("Secure"), "Cookie cross-origin HTTPS doit inclure Secure");
+
     console.log(
-      "[backend/tests/auth.test.ts] Auth JWT/Cookie 401/403, login et export .docx validés."
+      "[backend/tests/auth.test.ts] Auth JWT/Cookie 401/403, HTTPS SameSite=None, login et export .docx validés."
     );
   } finally {
     server.close();

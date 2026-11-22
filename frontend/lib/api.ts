@@ -1,15 +1,77 @@
-import axios from "axios";
+import axios, { type InternalAxiosRequestConfig } from "axios";
 
-const rawBaseUrl = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
-const baseURL = rawBaseUrl ? `${rawBaseUrl}/api` : "/api";
+const rawBaseUrl = (process.env.NEXT_PUBLIC_API_URL || "").trim().replace(/\/+$/, "");
+const baseURL =
+  !rawBaseUrl || rawBaseUrl === "/api"
+    ? "/api"
+    : rawBaseUrl.toLowerCase().endsWith("/api")
+      ? rawBaseUrl
+      : `${rawBaseUrl}/api`;
+const SESSION_TOKEN_KEY = "misaina_session_jwt";
+
+function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(SESSION_TOKEN_KEY) || window.localStorage.getItem(SESSION_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (token) {
+      window.sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+      window.localStorage.setItem(SESSION_TOKEN_KEY, token);
+    } else {
+      window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+      window.localStorage.removeItem(SESSION_TOKEN_KEY);
+    }
+  } catch {
+    // ignore storage quota / privacy mode errors
+  }
+}
 
 export const api = axios.create({
   baseURL,
+  timeout: 25000,
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },
 });
+
+api.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token && !config.headers.Authorization) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error?.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined;
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+
+    if (status === 401) {
+      setStoredToken(null);
+      return Promise.reject(error);
+    }
+
+    const isGet = config?.method?.toLowerCase() === "get";
+    const isTransient = !status || status === 502 || status === 503 || status === 504;
+    if (config && isGet && isTransient && !config._retried) {
+      config._retried = true;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return api.request(config);
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 export interface AuthUser {
   id: string;
@@ -215,6 +277,25 @@ export function isUnauthorizedError(err: unknown): boolean {
   return axios.isAxiosError(err) && err.response?.status === 401;
 }
 
+export function describeApiError(err: unknown): string {
+  if (!axios.isAxiosError(err)) {
+    return err instanceof Error ? err.message : "Erreur inconnue";
+  }
+  const status = err.response?.status;
+  const serverMsg =
+    typeof err.response?.data === "object" &&
+    err.response?.data !== null &&
+    "message" in err.response.data
+      ? String((err.response.data as { message?: unknown }).message || "")
+      : "";
+  if (serverMsg) return status ? `HTTP ${status} — ${serverMsg}` : serverMsg;
+  if (status) return `HTTP ${status} (${err.response?.statusText || "Erreur serveur"})`;
+  if (err.code === "ECONNABORTED") {
+    return "Délai dépassé : le serveur backend met du temps à démarrer.";
+  }
+  return "Backend injoignable (vérifiez NEXT_PUBLIC_API_URL, BACKEND_URL ou CORS_ORIGIN).";
+}
+
 export const guardianApi = {
   login: (email: string, password: string) =>
     api
@@ -222,8 +303,17 @@ export const guardianApi = {
         email,
         password,
       })
-      .then((r) => r.data),
-  logout: () => api.post<{ loggedOut: boolean }>("/auth/logout").then((r) => r.data),
+      .then((r) => {
+        if (r.data?.token) setStoredToken(r.data.token);
+        return r.data;
+      }),
+  logout: () =>
+    api
+      .post<{ loggedOut: boolean }>("/auth/logout")
+      .then((r) => r.data)
+      .finally(() => {
+        setStoredToken(null);
+      }),
   me: () => api.get<{ user: AuthUser; spaces: UserSpace[] }>("/auth/me").then((r) => r.data),
 
   getSpaces: () => api.get<{ spaces: UserSpace[] }>("/spaces").then((r) => r.data),

@@ -210,19 +210,47 @@ export function authenticateRequest(req: IncomingMessage): AuthPrincipal {
   return verifySessionJwt(token);
 }
 
-export function buildSessionCookieHeader(token: string, maxAgeSeconds = SESSION_TTL_SECONDS): string {
-  const isProd = process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE === "true";
+export function isHttpsRequest(req?: IncomingMessage): boolean {
+  if (process.env.COOKIE_SECURE === "true") return true;
+  if (process.env.COOKIE_SECURE === "false") return false;
+  if (!req) return false;
+  const proto = req.headers["x-forwarded-proto"];
+  if (typeof proto === "string" && proto.split(",")[0].trim().toLowerCase() === "https") {
+    return true;
+  }
+  const origin = req.headers.origin;
+  if (typeof origin === "string" && origin.startsWith("https://")) {
+    return true;
+  }
+  return false;
+}
+
+export function buildSessionCookieHeader(
+  token: string,
+  maxAgeSeconds = SESSION_TTL_SECONDS,
+  req?: IncomingMessage
+): string {
+  const secure = isHttpsRequest(req);
   const parts = [
     `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    secure ? "SameSite=None" : "SameSite=Lax",
     `Max-Age=${maxAgeSeconds}`,
   ];
-  if (isProd) parts.push("Secure");
+  if (secure) parts.push("Secure");
   return parts.join("; ");
 }
 
-export function buildClearSessionCookieHeader(): string {
-  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+export function buildClearSessionCookieHeader(req?: IncomingMessage): string {
+  const secure = isHttpsRequest(req);
+  const parts = [
+    `${SESSION_COOKIE_NAME}=`,
+    "Path=/",
+    "HttpOnly",
+    secure ? "SameSite=None" : "SameSite=Lax",
+    "Max-Age=0",
+  ];
+  if (secure) parts.push("Secure");
+  return parts.join("; ");
 }

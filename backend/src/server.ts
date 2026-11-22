@@ -25,27 +25,61 @@ function getAllowedCorsOrigins(): string[] {
   return parsed.length > 0 ? Array.from(new Set(parsed)) : ["http://localhost:3000"];
 }
 
+function isOriginAllowed(requestOrigin: string, allowedOrigins: string[]): boolean {
+  const normalized = normalizeOrigin(requestOrigin);
+  if (allowedOrigins.includes("*")) return true;
+  if (allowedOrigins.includes(normalized)) return true;
+  if (allowedOrigins.includes("http://localhost:3000")) return true;
+
+  for (const pattern of allowedOrigins) {
+    if (pattern.includes("*")) {
+      const regex = new RegExp(
+        `^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]+")}$`
+      );
+      if (regex.test(normalized)) return true;
+    }
+    try {
+      const reqUrl = new URL(normalized);
+      const allowedUrl = new URL(pattern);
+      if (
+        reqUrl.protocol === allowedUrl.protocol &&
+        allowedUrl.hostname.endsWith(".vercel.app") &&
+        reqUrl.hostname.endsWith(".vercel.app")
+      ) {
+        const projectPrefix = allowedUrl.hostname.replace(/\.vercel\.app$/, "");
+        if (
+          reqUrl.hostname === allowedUrl.hostname ||
+          reqUrl.hostname.startsWith(`${projectPrefix}-`)
+        ) {
+          return true;
+        }
+      }
+    } catch {
+      // ignore invalid URL pattern
+    }
+  }
+  return false;
+}
+
 export function createGuardianServer() {
   return http.createServer(async (req, res) => {
     const allowedOrigins = getAllowedCorsOrigins();
     const requestOrigin = req.headers.origin;
-    const normalizedRequestOrigin = requestOrigin ? normalizeOrigin(requestOrigin) : "";
     const allowOrigin =
       allowedOrigins.includes("*")
         ? "*"
-        : normalizedRequestOrigin && allowedOrigins.includes(normalizedRequestOrigin)
-          ? requestOrigin!
-          : normalizedRequestOrigin && allowedOrigins.includes("http://localhost:3000")
-            ? requestOrigin!
-            : allowedOrigins[0];
+        : requestOrigin && isOriginAllowed(requestOrigin, allowedOrigins)
+          ? requestOrigin
+          : allowedOrigins[0];
 
     res.setHeader("Access-Control-Allow-Origin", allowOrigin);
     res.setHeader("Vary", "Origin");
     if (allowOrigin !== "*") {
       res.setHeader("Access-Control-Allow-Credentials", "true");
     }
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+    res.setHeader("Access-Control-Max-Age", "86400");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
