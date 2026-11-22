@@ -12,6 +12,7 @@ import type {
   UserSpace,
   ValidationItem,
 } from "./connectors/types";
+import type { AuthPrincipal, Permission } from "./tenant";
 
 let pgPool: Pool | undefined;
 let pgReadyPromise: Promise<boolean> | undefined;
@@ -293,6 +294,19 @@ ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
+CREATE TABLE IF NOT EXISTS guardian_users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  full_name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  department TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  validated_by TEXT,
+  validated_at TEXT
+);
 `;
 
 export function enqueuePgTask(task: (pool: Pool) => Promise<void>): void {
@@ -313,6 +327,7 @@ export async function flushPgQueue(): Promise<void> {
 export async function initAndHydrateFromPg(seedDefaults: {
   spaces: UserSpace[];
   sources: DataSourceConfig[];
+  users?: Array<{ user: AuthPrincipal; passwordHash: string }>;
 }) {
   if (!isPgEnabled()) return null;
   const pool = getPgPool();
@@ -328,6 +343,11 @@ export async function initAndHydrateFromPg(seedDefaults: {
         for (const s of seedDefaults.spaces) await upsertSpacePg(pool, s);
         for (const src of seedDefaults.sources) await upsertSourcePg(pool, src);
       }
+      if (Array.isArray(seedDefaults.users)) {
+        for (const item of seedDefaults.users) {
+          await insertSeedUserIfMissingPg(pool, item.user, item.passwordHash);
+        }
+      }
       return true;
     })().catch((err) => {
       pgReadyPromise = undefined;
@@ -340,7 +360,7 @@ export async function initAndHydrateFromPg(seedDefaults: {
   if (!ok) return null;
   await flushPgQueue();
 
-  const [spacesRes, sourcesRes, rawRes, normRes, rulesRes, runsRes, anomRes, valRes, actRes, fbRes] =
+  const [spacesRes, sourcesRes, rawRes, normRes, rulesRes, runsRes, anomRes, valRes, actRes, fbRes, usersRes] =
     await Promise.all([
       pool.query("SELECT * FROM guardian_spaces ORDER BY created_at ASC"),
       pool.query("SELECT * FROM guardian_sources ORDER BY created_at ASC"),
@@ -352,6 +372,7 @@ export async function initAndHydrateFromPg(seedDefaults: {
       pool.query("SELECT * FROM guardian_validations ORDER BY created_at DESC"),
       pool.query("SELECT * FROM agent_actions ORDER BY timestamp DESC"),
       pool.query("SELECT * FROM guardian_rule_feedback"),
+      pool.query("SELECT * FROM guardian_users ORDER BY created_at ASC"),
     ]);
 
   return {
@@ -542,6 +563,21 @@ export async function initAndHydrateFromPg(seedDefaults: {
         updatedAt: r.updated_at,
       } satisfies RuleFeedbackStat;
     }),
+    users: usersRes.rows.map((r) => ({
+      user: {
+        id: r.id,
+        email: r.email,
+        fullName: r.full_name,
+        role: r.role,
+        department: r.department,
+        status: r.status,
+        permissions: Array.isArray(r.permissions) ? (r.permissions as Permission[]) : [],
+        createdAt: r.created_at,
+        validatedBy: r.validated_by ?? undefined,
+        validatedAt: r.validated_at ?? undefined,
+      } satisfies AuthPrincipal,
+      passwordHash: String(r.password_hash || ""),
+    })),
   };
 }
 
@@ -726,5 +762,68 @@ export async function upsertRuleFeedbackPg(pool: Pool, stat: RuleFeedbackStat): 
        rejected_count = EXCLUDED.rejected_count,
        updated_at = EXCLUDED.updated_at`,
     [stat.tenantId, stat.spaceId, stat.ruleId, stat.approvedCount, stat.rejectedCount, stat.updatedAt]
+  );
+}
+
+export async function insertSeedUserIfMissingPg(
+  pool: Pool,
+  user: AuthPrincipal,
+  passwordHash: string
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO guardian_users (
+       id, email, full_name, role, department, status, permissions,
+       password_hash, created_at, validated_by, validated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      user.id,
+      user.email.toLowerCase(),
+      user.fullName,
+      user.role,
+      user.department,
+      user.status,
+      JSON.stringify(user.permissions || []),
+      passwordHash,
+      user.createdAt,
+      user.validatedBy ?? null,
+      user.validatedAt ?? null,
+    ]
+  );
+}
+
+export async function upsertUserPg(
+  pool: Pool,
+  user: AuthPrincipal,
+  passwordHash: string
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO guardian_users (
+       id, email, full_name, role, department, status, permissions,
+       password_hash, created_at, validated_by, validated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)
+     ON CONFLICT (id) DO UPDATE SET
+       email = EXCLUDED.email,
+       full_name = EXCLUDED.full_name,
+       role = EXCLUDED.role,
+       department = EXCLUDED.department,
+       status = EXCLUDED.status,
+       permissions = EXCLUDED.permissions,
+       password_hash = EXCLUDED.password_hash,
+       validated_by = EXCLUDED.validated_by,
+       validated_at = EXCLUDED.validated_at`,
+    [
+      user.id,
+      user.email.toLowerCase(),
+      user.fullName,
+      user.role,
+      user.department,
+      user.status,
+      JSON.stringify(user.permissions || []),
+      passwordHash,
+      user.createdAt,
+      user.validatedBy ?? null,
+      user.validatedAt ?? null,
+    ]
   );
 }

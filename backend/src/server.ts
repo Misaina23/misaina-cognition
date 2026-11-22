@@ -143,6 +143,7 @@ export function createGuardianServer() {
         llmModel: activeLlm.modelName,
       });
     }
+    await journalRepo.ensureReady();
     if (url.pathname.startsWith("/api/auth")) {
       return handleAuthRoute(req, res, url);
     }

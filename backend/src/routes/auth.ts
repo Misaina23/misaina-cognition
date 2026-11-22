@@ -38,6 +38,7 @@ export async function handleAuthRoute(
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       const body = RegisterSchema.parse(await readJsonBody(req));
       const created = registerPendingAccount(body);
+      await journalRepo.flushPg();
       return sendJson(res, 201, {
         registered: true,
         status: created.status,
