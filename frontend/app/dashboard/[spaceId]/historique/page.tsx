@@ -106,7 +106,15 @@ export default function SpaceHistoriquePage() {
                       <td className="py-2.5 pr-3 font-mono font-medium whitespace-nowrap">
                         {act.toolName}
                       </td>
-                      <td className="py-2.5 pr-3 max-w-md">{act.decision}</td>
+                      <td className="py-2.5 pr-3 max-w-md space-y-1">
+                        <div>{act.decision}</div>
+                        {act.llmProvider && (
+                          <div className="font-mono text-[10px] text-primary">
+                            {act.llmProvider}/{act.llmModel || "default"} · {act.tokensUsed ?? 0} tok ·{" "}
+                            {act.durationMs ?? 0} ms
+                          </div>
+                        )}
+                      </td>
                       <td className="py-2.5 pr-3 font-mono">
                         {(act.confidence * 100).toFixed(0)} %
                       </td>

@@ -271,12 +271,20 @@ CREATE TABLE IF NOT EXISTS agent_actions (
   confidence DOUBLE PRECISION NOT NULL,
   author TEXT NOT NULL,
   author_id TEXT,
+  llm_provider TEXT,
+  llm_model TEXT,
+  tokens_used INTEGER,
+  duration_ms INTEGER,
   reversible BOOLEAN NOT NULL DEFAULT FALSE,
   reverted BOOLEAN NOT NULL DEFAULT FALSE,
   reverted_at TEXT,
   reverted_by TEXT,
   snapshot_before JSONB
 );
+ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS llm_provider TEXT;
+ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS llm_model TEXT;
+ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
+ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
 `;
 
 export function enqueuePgTask(task: (pool: Pool) => Promise<void>): void {
@@ -487,6 +495,12 @@ export async function initAndHydrateFromPg(seedDefaults: {
       confidence: Number(r.confidence ?? 0),
       author: r.author,
       authorId: r.author_id ?? undefined,
+      llmProvider: r.llm_provider ?? undefined,
+      llmModel: r.llm_model ?? undefined,
+      tokensUsed:
+        r.tokens_used === null || r.tokens_used === undefined ? undefined : Number(r.tokens_used),
+      durationMs:
+        r.duration_ms === null || r.duration_ms === undefined ? undefined : Number(r.duration_ms),
       reversible: Boolean(r.reversible),
       reverted: Boolean(r.reverted),
       revertedAt: r.reverted_at ?? undefined,
@@ -649,14 +663,16 @@ export async function upsertAgentActionPg(pool: Pool, act: AgentAction): Promise
   await pool.query(
     `INSERT INTO agent_actions (
        id, tenant_id, space_id, run_id, timestamp, tool_name, inputs, output,
-       decision, confidence, author, author_id, reversible, reverted, reverted_at,
-       reverted_by, snapshot_before
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
+       decision, confidence, author, author_id, llm_provider, llm_model, tokens_used, duration_ms,
+       reversible, reverted, reverted_at, reverted_by, snapshot_before
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb)
      ON CONFLICT (id) DO UPDATE SET reverted = EXCLUDED.reverted, reverted_at = EXCLUDED.reverted_at, reverted_by = EXCLUDED.reverted_by`,
     [
       act.id, act.tenantId, act.spaceId, act.runId, act.timestamp, act.toolName,
       JSON.stringify(act.inputs ?? {}), JSON.stringify(act.output ?? {}), act.decision,
-      act.confidence, act.author, act.authorId ?? null, act.reversible, act.reverted,
+      act.confidence, act.author, act.authorId ?? null,
+      act.llmProvider ?? null, act.llmModel ?? null, act.tokensUsed ?? null, act.durationMs ?? null,
+      act.reversible, act.reverted,
       act.revertedAt ?? null, act.revertedBy ?? null,
       act.snapshotBefore ? JSON.stringify(act.snapshotBefore) : null,
     ]

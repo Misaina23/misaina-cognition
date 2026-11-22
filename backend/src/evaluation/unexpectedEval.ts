@@ -236,11 +236,11 @@ export async function runUnexpectedCasesEvaluation(
         recordedAt: r.recordedAt,
         zone: r.zone,
       }));
-      const resp = await provider.generate({
-        systemInstruction:
+      const resp = await provider.chat({
+        system:
           "Repère les anomalies sémantiques imprévues. Réponds en JSON {flagged:[{externalId,reason}]}.",
         messages: [{ role: "user", text: JSON.stringify(compactRows) }],
-        jsonSchema: { type: "object" },
+        schema: { type: "object" },
       });
       const parsedLlm = JSON.parse(resp.text || "{}") as {
         flagged?: Array<{ externalId?: string; reason?: string }>;

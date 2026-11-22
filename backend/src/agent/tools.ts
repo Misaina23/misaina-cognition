@@ -1,6 +1,6 @@
-import { FunctionDeclaration, Type } from "@google/genai";
 import type { TenantSpaceContext } from "../connectors/types";
 import { executeReversibleArchive, executeReversibleMerge, journalRepo } from "../journal";
+import type { LlmToolDeclaration } from "../llm/provider";
 import { dispatchRunSummaryNotification } from "../notify/index";
 import { computeRecordSimilarity } from "../rules/dedupe";
 import type { ProjectRulesConfig } from "../rules/engine";
@@ -8,15 +8,15 @@ import { classifySimilarityBand } from "./guardrails";
 import { RunPseudonymizer } from "./pseudonymize";
 import { ToolArgSchemas } from "./schemas";
 
-export const GUARDIAN_TOOL_DECLARATIONS: FunctionDeclaration[] = [
+export const GUARDIAN_TOOL_DECLARATIONS: LlmToolDeclaration[] = [
   {
     name: "list_anomalies",
     description: "Liste les anomalies détectées dans l'espace courant (données pseudonymisées).",
     parameters: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        severity: { type: Type.STRING },
-        onlyOpen: { type: Type.BOOLEAN },
+        severity: { type: "string" },
+        onlyOpen: { type: "boolean" },
       },
     },
   },
@@ -24,10 +24,10 @@ export const GUARDIAN_TOOL_DECLARATIONS: FunctionDeclaration[] = [
     name: "find_similar",
     description: "Recherche les enregistrements similaires dans l'espace courant.",
     parameters: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        recordId: { type: Type.STRING },
-        minScore: { type: Type.NUMBER },
+        recordId: { type: "string" },
+        minScore: { type: "number" },
       },
       required: ["recordId"],
     },
@@ -36,10 +36,10 @@ export const GUARDIAN_TOOL_DECLARATIONS: FunctionDeclaration[] = [
     name: "compare_records",
     description: "Compare deux enregistrements pseudonymisés.",
     parameters: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        recordIdA: { type: Type.STRING },
-        recordIdB: { type: Type.STRING },
+        recordIdA: { type: "string" },
+        recordIdB: { type: "string" },
       },
       required: ["recordIdA", "recordIdB"],
     },
@@ -48,13 +48,13 @@ export const GUARDIAN_TOOL_DECLARATIONS: FunctionDeclaration[] = [
     name: "propose_merge",
     description: "Fusionne de manière réversible ou envoie vers la validation humaine selon les seuils.",
     parameters: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        primaryRecordId: { type: Type.STRING },
-        secondaryRecordId: { type: Type.STRING },
-        anomalyId: { type: Type.STRING },
-        confidence: { type: Type.NUMBER },
-        reason: { type: Type.STRING },
+        primaryRecordId: { type: "string" },
+        secondaryRecordId: { type: "string" },
+        anomalyId: { type: "string" },
+        confidence: { type: "number" },
+        reason: { type: "string" },
       },
       required: ["primaryRecordId", "secondaryRecordId", "confidence", "reason"],
     },
@@ -63,12 +63,12 @@ export const GUARDIAN_TOOL_DECLARATIONS: FunctionDeclaration[] = [
     name: "archive_record",
     description: "Archive un enregistrement sans jamais le supprimer physiquement.",
     parameters: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        recordId: { type: Type.STRING },
-        anomalyId: { type: Type.STRING },
-        confidence: { type: Type.NUMBER },
-        reason: { type: Type.STRING },
+        recordId: { type: "string" },
+        anomalyId: { type: "string" },
+        confidence: { type: "number" },
+        reason: { type: "string" },
       },
       required: ["recordId", "confidence", "reason"],
     },
@@ -77,15 +77,15 @@ export const GUARDIAN_TOOL_DECLARATIONS: FunctionDeclaration[] = [
     name: "request_validation",
     description: "Ajoute un cas ambigu (ou écart GPS/zone d'intervention) en file de validation humaine.",
     parameters: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        actionType: { type: Type.STRING },
-        title: { type: Type.STRING },
-        description: { type: Type.STRING },
-        primaryRecordId: { type: Type.STRING },
-        secondaryRecordId: { type: Type.STRING },
-        anomalyId: { type: Type.STRING },
-        confidence: { type: Type.NUMBER },
+        actionType: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+        primaryRecordId: { type: "string" },
+        secondaryRecordId: { type: "string" },
+        anomalyId: { type: "string" },
+        confidence: { type: "number" },
       },
       required: ["actionType", "title", "description", "primaryRecordId", "confidence"],
     },
@@ -94,11 +94,11 @@ export const GUARDIAN_TOOL_DECLARATIONS: FunctionDeclaration[] = [
     name: "write_summary",
     description: "Rédige et diffuse le résumé final du run.",
     parameters: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        summaryText: { type: Type.STRING },
-        overallConfidence: { type: Type.NUMBER },
-        needsHumanReview: { type: Type.BOOLEAN },
+        summaryText: { type: "string" },
+        overallConfidence: { type: "number" },
+        needsHumanReview: { type: "boolean" },
       },
       required: ["summaryText", "overallConfidence"],
     },

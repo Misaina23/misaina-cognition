@@ -201,6 +201,10 @@ export interface AgentAction {
   confidence: number;
   author: "agent" | "human";
   authorId?: string;
+  llmProvider?: string;
+  llmModel?: string;
+  tokensUsed?: number;
+  durationMs?: number;
   reversible: boolean;
   reverted: boolean;
   revertedAt?: string;

@@ -1,7 +1,6 @@
-import { Type, type FunctionDeclaration } from "@google/genai";
 import type { TenantSpaceContext } from "../connectors/types";
 import { journalRepo } from "../journal";
-import { createLlmProvider, type LlmMessage } from "../llm/provider";
+import { createLlmProvider, type LlmMessage, type LlmToolDeclaration } from "../llm/provider";
 import { normalizeText } from "../rules/dedupe";
 
 export interface NlqQueryParams {
@@ -34,23 +33,23 @@ export interface NlqAnswer {
   tokensUsed: number;
 }
 
-export const READ_ONLY_QUERY_TOOL_DECLARATION: FunctionDeclaration = {
+export const READ_ONLY_QUERY_TOOL_DECLARATION: LlmToolDeclaration = {
   name: "query_space_data",
   description:
     "Outil en LECTURE SEULE strictement borné à l'espace courant (tenantId, spaceId). Permet de compter, agréger par zone/source ou lister anomalies et doublons.",
   parameters: {
-    type: Type.OBJECT,
+    type: "object",
     properties: {
       metric: {
-        type: Type.STRING,
+        type: "string",
         description:
           "summary | count_records | sum_amount | list_anomalies | list_duplicates | by_zone | by_source | search_records",
       },
-      zone: { type: Type.STRING },
-      severity: { type: Type.STRING },
-      status: { type: Type.STRING },
-      searchText: { type: Type.STRING },
-      limit: { type: Type.NUMBER },
+      zone: { type: "string" },
+      severity: { type: "string" },
+      status: { type: "string" },
+      searchText: { type: "string" },
+      limit: { type: "number" },
     },
     required: ["metric"],
   },
@@ -410,12 +409,12 @@ Utilise obligatoirement l'outil query_space_data pour lire les chiffres réels p
       let usedMetric = fallbackParams.metric;
 
       for (let turn = 0; turn < 3; turn++) {
-        const res = await provider.generate({
-          systemInstruction,
+        const res = await provider.chat({
+          system: systemInstruction,
           messages,
           tools: [READ_ONLY_QUERY_TOOL_DECLARATION],
         });
-        tokensUsed += res.tokensUsed;
+        tokensUsed += res.usage.totalTokens;
 
         if (res.toolCalls.length > 0) {
           messages.push({ role: "assistant", text: res.text, toolCalls: res.toolCalls });

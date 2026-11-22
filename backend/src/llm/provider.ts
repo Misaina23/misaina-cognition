@@ -1,6 +1,25 @@
-import { GoogleGenAI, type Content, type FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Schema } from "@google/genai";
 
-export type LlmProviderName = "gemini" | "openai" | "anthropic" | "deterministic";
+export type LlmProviderName = "gemini" | "openai" | "anthropic" | "mock" | "deterministic";
+
+export interface LlmToolParameterProperty {
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object";
+  description?: string;
+  enum?: string[];
+  items?: LlmToolParameterProperty;
+  properties?: Record<string, LlmToolParameterProperty>;
+  required?: string[];
+}
+
+export interface LlmToolDeclaration {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, LlmToolParameterProperty>;
+    required?: string[];
+  };
+}
 
 export interface LlmToolCall {
   id?: string;
@@ -19,33 +38,84 @@ export interface LlmMessage {
   };
 }
 
-export interface LlmGenerateParams {
-  systemInstruction: string;
+export interface LlmChatParams {
+  system: string;
   messages: LlmMessage[];
-  tools?: FunctionDeclaration[];
-  jsonSchema?: Record<string, unknown>;
+  tools?: LlmToolDeclaration[];
+  schema?: Record<string, unknown>;
 }
 
-export interface LlmGenerateResult {
+export interface LlmUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  durationMs: number;
+}
+
+export interface LlmChatResult {
   text: string;
   toolCalls: LlmToolCall[];
-  tokensUsed: number;
-  costUsd: number;
+  usage: LlmUsage;
 }
 
+/**
+ * Interface unique d'abstraction LLM : aucun état métier, aucune pseudonymisation,
+ * aucun garde-fou ni journalisation dans les adaptateurs.
+ */
 export interface LlmProvider {
   readonly providerName: LlmProviderName;
   readonly modelName: string;
-  generate(params: LlmGenerateParams): Promise<LlmGenerateResult>;
+  chat(params: LlmChatParams): Promise<LlmChatResult>;
 }
 
-function estimateCostUsd(provider: LlmProviderName, tokens: number): number {
+function estimateCostUsd(provider: LlmProviderName, totalTokens: number): number {
   const ratePerMillion =
     provider === "anthropic" ? 0.8 : provider === "openai" ? 0.4 : provider === "gemini" ? 0.15 : 0;
-  return Number(((tokens / 1_000_000) * ratePerMillion).toFixed(6));
+  return Number(((totalTokens / 1_000_000) * ratePerMillion).toFixed(6));
 }
 
-class GeminiProvider implements LlmProvider {
+function toGeminiSchema(prop: LlmToolParameterProperty): Schema {
+  const typeMap: Record<LlmToolParameterProperty["type"], Type> = {
+    string: Type.STRING,
+    number: Type.NUMBER,
+    integer: Type.INTEGER,
+    boolean: Type.BOOLEAN,
+    array: Type.ARRAY,
+    object: Type.OBJECT,
+  };
+  return {
+    type: typeMap[prop.type],
+    ...(prop.description ? { description: prop.description } : {}),
+    ...(prop.enum ? { enum: prop.enum } : {}),
+    ...(prop.items ? { items: toGeminiSchema(prop.items) } : {}),
+    ...(prop.properties
+      ? {
+          properties: Object.fromEntries(
+            Object.entries(prop.properties).map(([k, v]) => [k, toGeminiSchema(v)])
+          ),
+        }
+      : {}),
+    ...(prop.required ? { required: prop.required } : {}),
+  };
+}
+
+function toGeminiFunctionDeclarations(tools?: LlmToolDeclaration[]): FunctionDeclaration[] | undefined {
+  if (!tools?.length) return undefined;
+  return tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    parameters: {
+      type: Type.OBJECT,
+      properties: Object.fromEntries(
+        Object.entries(t.parameters.properties).map(([k, v]) => [k, toGeminiSchema(v)])
+      ),
+      ...(t.parameters.required ? { required: t.parameters.required } : {}),
+    },
+  }));
+}
+
+export class GeminiProvider implements LlmProvider {
   readonly providerName = "gemini" as const;
   readonly modelName: string;
   private readonly client: GoogleGenAI;
@@ -58,7 +128,8 @@ class GeminiProvider implements LlmProvider {
     });
   }
 
-  async generate(params: LlmGenerateParams): Promise<LlmGenerateResult> {
+  async chat(params: LlmChatParams): Promise<LlmChatResult> {
+    const startedMs = Date.now();
     const contents: Content[] = params.messages.map((m) => {
       if (m.role === "assistant" && m.toolCalls?.length) {
         return {
@@ -88,17 +159,20 @@ class GeminiProvider implements LlmProvider {
       };
     });
 
+    const functionDeclarations = toGeminiFunctionDeclarations(params.tools);
     const resp = await this.client.models.generateContent({
       model: this.modelName,
       contents,
       config: {
-        systemInstruction: params.systemInstruction,
-        ...(params.tools?.length ? { tools: [{ functionDeclarations: params.tools }] } : {}),
-        ...(params.jsonSchema ? { responseMimeType: "application/json" } : {}),
+        systemInstruction: params.system,
+        ...(functionDeclarations ? { tools: [{ functionDeclarations }] } : {}),
+        ...(params.schema ? { responseMimeType: "application/json" } : {}),
       },
     });
 
-    const tokensUsed = resp.usageMetadata?.totalTokenCount ?? 450;
+    const inputTokens = resp.usageMetadata?.promptTokenCount ?? 300;
+    const outputTokens = resp.usageMetadata?.candidatesTokenCount ?? 150;
+    const totalTokens = resp.usageMetadata?.totalTokenCount ?? inputTokens + outputTokens;
     const toolCalls: LlmToolCall[] = (resp.functionCalls || []).map((fc) => ({
       id: fc.id,
       name: fc.name || "",
@@ -108,13 +182,18 @@ class GeminiProvider implements LlmProvider {
     return {
       text: (resp.text || "").trim(),
       toolCalls,
-      tokensUsed,
-      costUsd: estimateCostUsd("gemini", tokensUsed),
+      usage: {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        costUsd: estimateCostUsd("gemini", totalTokens),
+        durationMs: Math.max(0, Date.now() - startedMs),
+      },
     };
   }
 }
 
-class OpenAiCompatibleProvider implements LlmProvider {
+export class OpenAiCompatibleProvider implements LlmProvider {
   readonly providerName = "openai" as const;
   readonly modelName: string;
   private readonly apiKey: string;
@@ -126,9 +205,10 @@ class OpenAiCompatibleProvider implements LlmProvider {
     this.baseUrl = (baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
   }
 
-  async generate(params: LlmGenerateParams): Promise<LlmGenerateResult> {
+  async chat(params: LlmChatParams): Promise<LlmChatResult> {
+    const startedMs = Date.now();
     const messages = [
-      { role: "system", content: params.systemInstruction },
+      { role: "system", content: params.system },
       ...params.messages.map((m) => {
         if (m.role === "tool" && m.toolResult) {
           return {
@@ -156,8 +236,8 @@ class OpenAiCompatibleProvider implements LlmProvider {
       type: "function",
       function: {
         name: t.name,
-        description: t.description || "",
-        parameters: t.parameters || { type: "object", properties: {} },
+        description: t.description,
+        parameters: t.parameters,
       },
     }));
 
@@ -171,12 +251,12 @@ class OpenAiCompatibleProvider implements LlmProvider {
         model: this.modelName,
         messages,
         ...(tools?.length ? { tools } : {}),
-        ...(params.jsonSchema ? { response_format: { type: "json_object" } } : {}),
+        ...(params.schema ? { response_format: { type: "json_object" } } : {}),
       }),
     });
     if (!res.ok) throw new Error(`Erreur fournisseur OpenAI (${res.status})`);
     const data = (await res.json()) as {
-      usage?: { total_tokens?: number };
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
       choices?: Array<{
         message?: {
           content?: string;
@@ -186,7 +266,9 @@ class OpenAiCompatibleProvider implements LlmProvider {
     };
 
     const msg = data.choices?.[0]?.message;
-    const tokensUsed = data.usage?.total_tokens ?? 500;
+    const inputTokens = data.usage?.prompt_tokens ?? 320;
+    const outputTokens = data.usage?.completion_tokens ?? 180;
+    const totalTokens = data.usage?.total_tokens ?? inputTokens + outputTokens;
     const toolCalls: LlmToolCall[] = (msg?.tool_calls || []).map((tc) => {
       let parsedArgs: Record<string, unknown> = {};
       try {
@@ -200,13 +282,18 @@ class OpenAiCompatibleProvider implements LlmProvider {
     return {
       text: (msg?.content || "").trim(),
       toolCalls,
-      tokensUsed,
-      costUsd: estimateCostUsd("openai", tokensUsed),
+      usage: {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        costUsd: estimateCostUsd("openai", totalTokens),
+        durationMs: Math.max(0, Date.now() - startedMs),
+      },
     };
   }
 }
 
-class AnthropicProvider implements LlmProvider {
+export class AnthropicProvider implements LlmProvider {
   readonly providerName = "anthropic" as const;
   readonly modelName: string;
   private readonly apiKey: string;
@@ -216,7 +303,8 @@ class AnthropicProvider implements LlmProvider {
     this.modelName = modelName || "claude-3-5-haiku-latest";
   }
 
-  async generate(params: LlmGenerateParams): Promise<LlmGenerateResult> {
+  async chat(params: LlmChatParams): Promise<LlmChatResult> {
+    const startedMs = Date.now();
     const messages = params.messages.map((m) => {
       if (m.role === "tool" && m.toolResult) {
         return {
@@ -230,13 +318,27 @@ class AnthropicProvider implements LlmProvider {
           ],
         };
       }
+      if (m.role === "assistant" && m.toolCalls?.length) {
+        return {
+          role: "assistant",
+          content: [
+            ...(m.text ? [{ type: "text", text: m.text }] : []),
+            ...m.toolCalls.map((tc, i) => ({
+              type: "tool_use",
+              id: tc.id || `toolu_${i}`,
+              name: tc.name,
+              input: tc.args,
+            })),
+          ],
+        };
+      }
       return { role: m.role === "assistant" ? "assistant" : "user", content: m.text || "" };
     });
 
     const tools = params.tools?.map((t) => ({
       name: t.name,
-      description: t.description || "",
-      input_schema: t.parameters || { type: "object", properties: {} },
+      description: t.description,
+      input_schema: t.parameters,
     }));
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -249,7 +351,7 @@ class AnthropicProvider implements LlmProvider {
       body: JSON.stringify({
         model: this.modelName,
         max_tokens: 1024,
-        system: params.systemInstruction,
+        system: params.system,
         messages,
         ...(tools?.length ? { tools } : {}),
       }),
@@ -267,7 +369,9 @@ class AnthropicProvider implements LlmProvider {
       }>;
     };
 
-    const tokensUsed = (data.usage?.input_tokens ?? 300) + (data.usage?.output_tokens ?? 150);
+    const inputTokens = data.usage?.input_tokens ?? 300;
+    const outputTokens = data.usage?.output_tokens ?? 150;
+    const totalTokens = inputTokens + outputTokens;
     const text = (data.content || [])
       .filter((c) => c.type === "text")
       .map((c) => c.text || "")
@@ -280,28 +384,83 @@ class AnthropicProvider implements LlmProvider {
     return {
       text,
       toolCalls,
-      tokensUsed,
-      costUsd: estimateCostUsd("anthropic", tokensUsed),
+      usage: {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        costUsd: estimateCostUsd("anthropic", totalTokens),
+        durationMs: Math.max(0, Date.now() - startedMs),
+      },
     };
   }
 }
 
-class DeterministicFallbackProvider implements LlmProvider {
+export type MockChatHandler = (
+  params: LlmChatParams,
+  callIndex: number
+) => Promise<Partial<LlmChatResult>> | Partial<LlmChatResult>;
+
+let globalMockChatHandler: MockChatHandler | null = null;
+
+export function setMockLlmHandler(handler: MockChatHandler | null): void {
+  globalMockChatHandler = handler;
+}
+
+export class MockProvider implements LlmProvider {
+  readonly providerName = "mock" as const;
+  readonly modelName: string;
+  private readonly handler?: MockChatHandler;
+  private callIndex = 0;
+
+  constructor(handler?: MockChatHandler, modelName = "mock-llm-v1") {
+    this.handler = handler;
+    this.modelName = modelName;
+  }
+
+  async chat(params: LlmChatParams): Promise<LlmChatResult> {
+    const startedMs = Date.now();
+    const idx = this.callIndex++;
+    const activeHandler = this.handler || globalMockChatHandler;
+    const raw = activeHandler ? await activeHandler(params, idx) : {};
+    const inputTokens = raw.usage?.inputTokens ?? 120;
+    const outputTokens = raw.usage?.outputTokens ?? 60;
+    const totalTokens = raw.usage?.totalTokens ?? inputTokens + outputTokens;
+
+    return {
+      text: raw.text ?? "",
+      toolCalls: raw.toolCalls ?? [],
+      usage: {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        costUsd: raw.usage?.costUsd ?? 0,
+        durationMs: raw.usage?.durationMs ?? Math.max(1, Date.now() - startedMs),
+      },
+    };
+  }
+}
+
+export class DeterministicFallbackProvider implements LlmProvider {
   readonly providerName = "deterministic" as const;
   readonly modelName = "rules-fallback-v1";
 
-  async generate(): Promise<LlmGenerateResult> {
-    return { text: "", toolCalls: [], tokensUsed: 0, costUsd: 0 };
+  async chat(): Promise<LlmChatResult> {
+    return {
+      text: "",
+      toolCalls: [],
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, durationMs: 0 },
+    };
   }
 }
 
 /**
- * Fabrique Multi-LLM : permet de changer de fournisseur (Gemini, OpenAI, Anthropic,
- * ou repli déterministe) par configuration sans modifier la logique de l'agent.
+ * Fabrique Multi-LLM : sélection par LLM_PROVIDER (gemini par défaut), LLM_MODEL,
+ * MockProvider pour les tests, ou repli automatique sur le moteur déterministe si la clé manque.
  */
 export function createLlmProvider(override?: {
   provider?: LlmProviderName;
   model?: string;
+  mockHandler?: MockChatHandler;
 }): LlmProvider {
   const requested = (
     override?.provider ||
@@ -310,6 +469,9 @@ export function createLlmProvider(override?: {
   ).toLowerCase() as LlmProviderName | "";
   const model = override?.model || process.env.LLM_MODEL || undefined;
 
+  if (requested === "mock") {
+    return new MockProvider(override?.mockHandler, model || "mock-llm-v1");
+  }
   if (requested === "deterministic") return new DeterministicFallbackProvider();
   if (requested === "openai" && process.env.OPENAI_API_KEY) {
     return new OpenAiCompatibleProvider(

@@ -62,7 +62,12 @@ export function executeDeterministicRun(
 
 export async function runGuardianAgent(
   ctx: TenantSpaceContext,
-  options?: { sourceId?: string; trigger?: DataRun["trigger"]; existingRunId?: string }
+  options?: {
+    sourceId?: string;
+    trigger?: DataRun["trigger"];
+    existingRunId?: string;
+    llmProvider?: LlmProvider;
+  }
 ): Promise<{ run: DataRun; verdict: AgentVerdict; usedGemini: boolean; llmProvider: string; llmModel: string }> {
   const startedMs = Date.now();
   const { config: rules } = journalRepo.getProjectRules(ctx);
@@ -123,7 +128,7 @@ export async function runGuardianAgent(
 
   const pseudonymizer = new RunPseudonymizer();
   const runtime = createScopedToolRuntime({ ctx, runId, rules, pseudonymizer });
-  const provider = createLlmProvider();
+  const provider = options?.llmProvider ?? createLlmProvider();
 
   let verdict: AgentVerdict | null = null;
   let usedLlm = false;
@@ -136,6 +141,7 @@ export async function runGuardianAgent(
   if (provider.providerName !== "deterministic") {
     try {
       const llmRes = await runLlmToolLoop({
+        ctx,
         provider,
         runId,
         rules,
@@ -219,7 +225,53 @@ export async function runGuardianAgent(
   };
 }
 
+function recordLlmCallAction(params: {
+  ctx: TenantSpaceContext;
+  runId: string;
+  provider: LlmProvider;
+  phase: "tool_loop" | "final_verdict";
+  turn: number;
+  messagesCount: number;
+  toolsCount: number;
+  response: Awaited<ReturnType<LlmProvider["chat"]>>;
+  durationMs: number;
+}): void {
+  const { ctx, runId, provider, phase, turn, messagesCount, toolsCount, response, durationMs } =
+    params;
+  const effectiveDurationMs = response.usage.durationMs || durationMs;
+  journalRepo.addAgentAction(ctx, {
+    id: `act-llm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    tenantId: ctx.tenantId,
+    spaceId: ctx.spaceId,
+    runId,
+    timestamp: new Date().toISOString(),
+    toolName: "llm_chat",
+    inputs: { phase, turn, messagesCount, toolsCount },
+    output: {
+      llmProvider: provider.providerName,
+      llmModel: provider.modelName,
+      inputTokens: response.usage.inputTokens,
+      outputTokens: response.usage.outputTokens,
+      totalTokens: response.usage.totalTokens,
+      costUsd: response.usage.costUsd,
+      durationMs: effectiveDurationMs,
+      toolCallsCount: response.toolCalls.length,
+      toolCallNames: response.toolCalls.map((c) => c.name),
+    },
+    decision: `Appel LLM ${provider.providerName}/${provider.modelName} (${phase}) — ${response.usage.totalTokens} tokens, ${effectiveDurationMs} ms`,
+    confidence: 1,
+    author: "agent",
+    llmProvider: provider.providerName,
+    llmModel: provider.modelName,
+    tokensUsed: response.usage.totalTokens,
+    durationMs: effectiveDurationMs,
+    reversible: false,
+    reverted: false,
+  });
+}
+
 async function runLlmToolLoop(params: {
+  ctx: TenantSpaceContext;
   provider: LlmProvider;
   runId: string;
   rules: ProjectRulesConfig;
@@ -227,9 +279,9 @@ async function runLlmToolLoop(params: {
   openCount: number;
   recordsCount: number;
 }): Promise<{ verdict: AgentVerdict; tokensUsed: number; costUsd: number; llmCallsCount: number }> {
-  const { provider, runId, rules, runtime, openCount, recordsCount } = params;
+  const { ctx, provider, runId, rules, runtime, openCount, recordsCount } = params;
 
-  const systemInstruction = `Agent autonome Gardien de données. Données PII pseudonymisées.
+  const system = `Agent autonome Gardien de données. Données PII pseudonymisées.
 - Utilisez propose_merge (>= ${rules.duplicateDetection.nearDuplicate.autoMergeThreshold} auto, sinon validation) et request_validation pour outliers, champs vides et écarts GPS/zone d'intervention.
 - Terminez par write_summary puis répondez uniquement en JSON.`;
 
@@ -246,14 +298,28 @@ async function runLlmToolLoop(params: {
 
   for (let turn = 0; turn < 10; turn++) {
     if (totalTokens >= rules.guardrails.maxTokensPerRun) throw new Error("Budget tokens dépassé.");
-    const response = await provider.generate({
-      systemInstruction,
+    const callStartMs = Date.now();
+    const response = await provider.chat({
+      system,
       messages,
       tools: GUARDIAN_TOOL_DECLARATIONS,
     });
+    const callDurationMs = Date.now() - callStartMs;
     llmCallsCount += 1;
-    totalTokens += response.tokensUsed;
-    totalCostUsd += response.costUsd;
+    totalTokens += response.usage.totalTokens;
+    totalCostUsd += response.usage.costUsd;
+
+    recordLlmCallAction({
+      ctx,
+      runId,
+      provider,
+      phase: "tool_loop",
+      turn,
+      messagesCount: messages.length,
+      toolsCount: GUARDIAN_TOOL_DECLARATIONS.length,
+      response,
+      durationMs: callDurationMs,
+    });
 
     if (response.toolCalls.length > 0) {
       messages.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls });
@@ -277,26 +343,42 @@ async function runLlmToolLoop(params: {
     break;
   }
 
-  const finalResp = await provider.generate({
-    systemInstruction: "Répondez uniquement avec un objet JSON strict valide.",
+  const verdictSchema = {
+    type: "object",
+    properties: {
+      decision: { type: "string" },
+      confidence: { type: "number" },
+      summary: { type: "string" },
+      actionsTaken: { type: "array", items: { type: "string" } },
+    },
+    required: ["decision", "confidence", "summary"],
+  };
+
+  const verdictStartMs = Date.now();
+  const finalResp = await provider.chat({
+    system: "Répondez uniquement avec un objet JSON strict valide.",
     messages: [
       ...messages,
       { role: "user", text: "Verdict JSON strict : decision, confidence, summary, actionsTaken." },
     ],
-    jsonSchema: {
-      type: "object",
-      properties: {
-        decision: { type: "string" },
-        confidence: { type: "number" },
-        summary: { type: "string" },
-        actionsTaken: { type: "array", items: { type: "string" } },
-      },
-      required: ["decision", "confidence", "summary"],
-    },
+    schema: verdictSchema,
   });
+  const verdictDurationMs = Date.now() - verdictStartMs;
   llmCallsCount += 1;
-  totalTokens += finalResp.tokensUsed;
-  totalCostUsd += finalResp.costUsd;
+  totalTokens += finalResp.usage.totalTokens;
+  totalCostUsd += finalResp.usage.costUsd;
+
+  recordLlmCallAction({
+    ctx,
+    runId,
+    provider,
+    phase: "final_verdict",
+    turn: llmCallsCount,
+    messagesCount: messages.length + 1,
+    toolsCount: 0,
+    response: finalResp,
+    durationMs: verdictDurationMs,
+  });
 
   return {
     verdict: AgentVerdictSchema.parse(JSON.parse((finalResp.text || "{}").trim())),

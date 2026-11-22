@@ -128,6 +128,10 @@ export interface AgentAction {
   decision: string;
   confidence: number;
   author: "agent" | "human";
+  llmProvider?: string;
+  llmModel?: string;
+  tokensUsed?: number;
+  durationMs?: number;
   reversible: boolean;
   reverted: boolean;
   revertedAt?: string;
