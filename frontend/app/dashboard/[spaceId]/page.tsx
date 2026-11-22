@@ -1,32 +1,40 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
-  Archive,
+  Bot,
   CheckCircle2,
+  Clock,
   Cpu,
   Database,
   FileCode2,
   FileDown,
   FileSpreadsheet,
   FlaskConical,
-  GitMerge,
+  FolderInput,
+  Mail,
   MessageSquare,
   MoonStar,
   Play,
   Plus,
   RefreshCw,
+  RotateCcw,
   Send,
+  ShieldAlert,
   Upload,
 } from "lucide-react";
 import { SpaceHeader } from "@/components/SpaceHeader";
 import {
+  describeApiError,
   guardianApi,
   isUnauthorizedError,
+  type AgentAction,
   type Anomaly,
+  type AutomationStatus,
   type DataRun,
   type DataSourceConfig,
   type MealIndicators,
@@ -34,10 +42,11 @@ import {
   type NormalizedRecord,
   type RuleFeedbackStat,
   type RuleThresholdSuggestion,
+  type RunEmailSummary,
   type UnexpectedEvalReport,
 } from "@/lib/api";
 
-type ActiveTab = "operations" | "records" | "rules";
+type ActiveTab = "agent_pipeline" | "data_sources" | "rules";
 
 const SAMPLE_KOBO_JSON = JSON.stringify(
   [
@@ -48,14 +57,16 @@ const SAMPLE_KOBO_JSON = JSON.stringify(
       age: 31,
       _geolocation: [14.7167, -17.4677],
       zone: "Dakar",
+      enqueteur: "ENQ-01",
     },
     {
       _id: "kobo-102",
       nom_complet: "Binta Diouf",
       telephone: "+221778889900",
       age: 162,
-      _geolocation: [14.7167, -17.4677],
-      zone: "Kaolack",
+      _geolocation: [14.14, -16.07],
+      zone: "Dakar",
+      enqueteur: "ENQ-02",
     },
   ],
   null,
@@ -67,6 +78,25 @@ const NLQ_EXAMPLES = [
   "Firy ny olona ao Dakar ary ohatrinona ny vola totaliny ?",
   "Quelles sont les anomalies bloquantes ?",
 ];
+
+function formatCategoryLabel(category: string): string {
+  switch (category) {
+    case "exact_duplicate":
+      return "Doublon exact";
+    case "near_duplicate":
+      return "Quasi-doublon ambigu";
+    case "outlier":
+      return "Valeur aberrante";
+    case "geo_out_of_bounds":
+      return "GPS hors zone";
+    case "enumerator_copy_paste":
+      return "Copier-coller enquêteur";
+    case "missing_required":
+      return "Champ obligatoire vide";
+    default:
+      return category;
+  }
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -85,10 +115,15 @@ export default function DashboardSpacePage() {
   const router = useRouter();
   const params = useParams<{ spaceId: string }>();
   const spaceId = decodeURIComponent(params.spaceId || "");
+  const encodedSpaceId = encodeURIComponent(spaceId);
 
-  const [tab, setTab] = useState<ActiveTab>("operations");
+  const [tab, setTab] = useState<ActiveTab>("agent_pipeline");
   const [runs, setRuns] = useState<DataRun[]>([]);
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+  const [emailSummaries, setEmailSummaries] = useState<RunEmailSummary[]>([]);
+  const [selectedEmailIdx, setSelectedEmailIdx] = useState(0);
+  const [automation, setAutomation] = useState<AutomationStatus | null>(null);
+  const [actions, setActions] = useState<AgentAction[]>([]);
   const [mealIndicators, setMealIndicators] = useState<MealIndicators | null>(null);
   const [sources, setSources] = useState<DataSourceConfig[]>([]);
   const [records, setRecords] = useState<NormalizedRecord[]>([]);
@@ -99,8 +134,9 @@ export default function DashboardSpacePage() {
 
   const [severityFilter, setSeverityFilter] = useState<"all" | Anomaly["severity"]>("all");
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
+  const [runningMode, setRunningMode] = useState<string | null>(null);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -126,8 +162,9 @@ export default function DashboardSpacePage() {
     if (!spaceId) return;
     setLoading(true);
     try {
-      const [runsRes, srcRes, recRes, rulesRes, fbRes, evalRes] = await Promise.all([
+      const [runsRes, actionsRes, srcRes, recRes, rulesRes, fbRes, evalRes] = await Promise.all([
         guardianApi.getRuns(spaceId),
+        guardianApi.getActions(spaceId),
         guardianApi.getSources(spaceId),
         guardianApi.getRecords(spaceId, true),
         guardianApi.getRules(spaceId),
@@ -136,7 +173,11 @@ export default function DashboardSpacePage() {
       ]);
       setRuns(runsRes.runs || []);
       setAnomalies(runsRes.anomalies || []);
+      setEmailSummaries(runsRes.emailSummaries || []);
+      setSelectedEmailIdx(0);
+      setAutomation(runsRes.automation || null);
       setMealIndicators(runsRes.mealIndicators || null);
+      setActions(actionsRes.actions || []);
       setSources(srcRes.sources || []);
       setRecords(recRes.records || []);
       setYamlDraft(rulesRes.rawYaml || "");
@@ -150,7 +191,7 @@ export default function DashboardSpacePage() {
       }
       setBanner({
         kind: "err",
-        text: "Accès refusé ou espace introuvable pour ce tenant.",
+        text: describeApiError(err),
       });
     } finally {
       setLoading(false);
@@ -161,29 +202,53 @@ export default function DashboardSpacePage() {
     void refresh();
   }, [refresh]);
 
-  async function handleRun(mode: "agent" | "nightly" | "autonomous_sync") {
-    setRunning(true);
+  async function handleRun(
+    mode: "agent" | "nightly" | "autonomous_sync" | "demo_kobo_ingest" | "inbox_drop"
+  ) {
+    setRunningMode(mode);
     setBanner(null);
     try {
       await guardianApi.triggerRun(spaceId, mode);
       await refresh();
+      const msgMap: Record<typeof mode, string> = {
+        demo_kobo_ingest:
+          "Export CommCare/Kobo anonymisé injecté (doublons, âge aberrant, GPS hors zone, copier-coller enquêteur) et contrôlé par l'agent.",
+        inbox_drop:
+          "Fichier CSV déposé dans l'inbox surveillée : déclenchement automatique, analyse et archivage terminés.",
+        nightly: "Tâche planifiée (Cron) exécutée sur les espaces actifs.",
+        autonomous_sync: "Synchronisation API autonome (CommCare / Kobo / ODK) terminée.",
+        agent: "Cycle complet de l'Agent IA (règles + tool use + journal + email) terminé.",
+      };
+      setBanner({ kind: "ok", text: msgMap[mode] });
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+        return;
+      }
+      setBanner({ kind: "err", text: describeApiError(err) });
+    } finally {
+      setRunningMode(null);
+    }
+  }
+
+  async function handleRollback(actionId: string) {
+    setRevertingId(actionId);
+    setBanner(null);
+    try {
+      await guardianApi.rollbackAction(spaceId, actionId);
+      await refresh();
       setBanner({
         kind: "ok",
-        text:
-          mode === "nightly"
-            ? "Contrôle nocturne MEAL exécuté sur les espaces."
-            : mode === "autonomous_sync"
-              ? "Synchronisation API autonome (CommCare / Kobo / ODK) terminée."
-              : "Contrôle MEAL autonome terminé.",
+        text: `Action ${actionId} annulée (rollback restauré dans le journal).`,
       });
     } catch (err) {
       if (isUnauthorizedError(err)) {
         router.replace("/login");
         return;
       }
-      setBanner({ kind: "err", text: "Échec lors du lancement du contrôle." });
+      setBanner({ kind: "err", text: describeApiError(err) });
     } finally {
-      setRunning(false);
+      setRevertingId(null);
     }
   }
 
@@ -328,60 +393,81 @@ export default function DashboardSpacePage() {
   }
 
   const latest = runs[0];
-  const cleanedCount = records.filter(
-    (r) => r.status === "merged" || r.status === "archived"
-  ).length;
   const totalTokens = runs.reduce((acc, r) => acc + (r.tokensUsed || 0), 0);
-  const totalCostUsd = runs.reduce((acc, r) => acc + (r.estimatedCostUsd || 0), 0);
   const totalLlmCalls = runs.reduce((acc, r) => acc + (r.llmCallsCount || 0), 0);
+
+  const severityCounts = useMemo(() => {
+    const counts = { bloquante: 0, a_verifier: 0, mineure: 0 };
+    for (const a of anomalies) counts[a.severity] += 1;
+    return counts;
+  }, [anomalies]);
 
   const filteredAnomalies = useMemo(() => {
     if (severityFilter === "all") return anomalies;
     return anomalies.filter((a) => a.severity === severityFilter);
   }, [anomalies, severityFilter]);
 
+  const activeEmail = emailSummaries[selectedEmailIdx] || emailSummaries[0] || null;
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-background text-foreground">
       <SpaceHeader
         spaceId={spaceId}
         activeSection="overview"
-        title={`Espace MEAL ${spaceId} — Qualité, Indicateurs & Anomalies`}
-        subtitle="Surveillance autonome CommCare/Kobo/CSV/Excel, détection copier-coller enquêteurs, observabilité LLM et rapport hebdo .docx."
+        title="Agent IA Autonome — Contrôle Qualité CommCare / Kobo"
+        subtitle="Déclencheur planifié ou dépôt fichier, règles déterministes + LLM tool use, résumé par email, anomalies classées par sévérité et journal anti-dérapage."
         actions={
           <>
             <button
+              type="button"
+              onClick={() => void handleRun("demo_kobo_ingest")}
+              disabled={runningMode !== null}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 disabled:opacity-50"
+            >
+              <Bot size={14} />
+              {runningMode === "demo_kobo_ingest"
+                ? "Injection & Analyse…"
+                : "Simuler export CommCare/Kobo"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleRun("inbox_drop")}
+              disabled={runningMode !== null}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              <FolderInput size={13} />
+              {runningMode === "inbox_drop" ? "Dépôt…" : "Tester dépôt Inbox"}
+            </button>
+            <button
+              type="button"
               onClick={() => void handleRun("agent")}
-              disabled={running}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+              disabled={runningMode !== null}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
               <Play size={13} />
-              {running ? "Analyse…" : "Lancer un contrôle"}
+              {runningMode === "agent" ? "Exécution…" : "Lancer Agent IA"}
             </button>
             <button
-              onClick={() => void handleRun("autonomous_sync")}
-              disabled={running}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
-            >
-              <RefreshCw size={13} /> Synchro API autonome
-            </button>
-            <button
+              type="button"
               onClick={() => void handleRun("nightly")}
-              disabled={running}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
+              disabled={runningMode !== null}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
-              <MoonStar size={13} /> Tâche nocturne
+              <MoonStar size={13} /> Cron planifié
             </button>
             <button
+              type="button"
               onClick={() => void handleDownloadWeeklyDocx()}
               disabled={downloadingDocx}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
               <FileDown size={13} />
-              {downloadingDocx ? "Export…" : "Rapport hebdo .docx"}
+              {downloadingDocx ? "Export…" : "Rapport .docx"}
             </button>
             <button
+              type="button"
               onClick={() => void refresh()}
-              className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1.5 text-xs text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground hover:text-foreground"
               aria-label="Actualiser"
             >
               <RefreshCw size={14} />
@@ -395,105 +481,414 @@ export default function DashboardSpacePage() {
           <div
             className={`rounded-xl border px-4 py-3 text-xs font-medium ${
               banner.kind === "err"
-                ? "border-red-500/30 bg-red-500/10 text-red-700"
-                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+                ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
             }`}
           >
             {banner.text}
           </div>
         )}
 
-        {/* KPIs + Observabilité LLM */}
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1 shadow-sm">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Enregistrements</span>
+        {/* Architecture 5 Piliers : Version Minimale Opérationnelle */}
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
+              <span>01 · Déclencheur</span>
+              <Clock size={14} />
+            </div>
+            <div className="text-xl font-bold font-mono tabular-nums">
+              {runs.length} run(s)
+            </div>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              Cron {automation?.nightlyCron || "0 2 * * *"} · Inbox{" "}
+              {automation?.inboxWatched ? "actif" : "prêt"}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
+              <span>02 · Données</span>
               <Database size={14} />
             </div>
-            <div className="text-2xl font-bold font-mono">{records.length}</div>
-            <div className="text-[11px] text-muted-foreground">
-              {latest ? `${latest.recordsProcessed} traités au dernier run` : "Brut immuable conservé"}
+            <div className="text-xl font-bold font-mono tabular-nums">
+              {records.length} fiche(s)
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              CommCare / Kobo / CSV (bruts immuables)
+            </p>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1 shadow-sm">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Doublons détectés</span>
-              <GitMerge size={14} />
+          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
+              <span>03 · Agent IA</span>
+              <Cpu size={14} />
             </div>
-            <div className="text-2xl font-bold font-mono">{latest?.duplicatesFound ?? 0}</div>
-            <div className="text-[11px] text-muted-foreground">Exacts + quasi-doublons</div>
+            <div className="text-xl font-bold font-mono tabular-nums">
+              {totalLlmCalls} appel(s) LLM
+            </div>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              Script YAML + Tool Use · {totalTokens} tok
+            </p>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1 shadow-sm">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Anomalies détectées</span>
-              <AlertTriangle size={14} className="text-amber-600" />
+          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
+              <span>04 · Résultat</span>
+              <Mail size={14} />
             </div>
-            <div className="text-2xl font-bold font-mono">{anomalies.length}</div>
-            <div className="text-[11px] text-muted-foreground">Règles YAML & écarts GPS/zone</div>
+            <div className="text-xl font-bold font-mono tabular-nums">
+              {anomalies.length} anomalie(s)
+            </div>
+            <p className="text-[11px] text-muted-foreground font-mono">
+              {severityCounts.bloquante} bloq · {severityCounts.a_verifier} vérif ·{" "}
+              {emailSummaries.length} email(s)
+            </p>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1 shadow-sm">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Lignes nettoyées</span>
-              <Archive size={14} />
+          <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
+              <span>05 · Journal</span>
+              <ShieldAlert size={14} />
             </div>
-            <div className="text-2xl font-bold font-mono">{cleanedCount}</div>
-            <div className="text-[11px] text-muted-foreground">Fusionnées ou archivées</div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-4 space-y-1 shadow-sm">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Observabilité LLM</span>
-              <Cpu size={14} className="text-primary" />
+            <div className="text-xl font-bold font-mono tabular-nums">
+              {actions.length} action(s)
             </div>
-            <div className="text-lg font-bold font-mono">
-              {totalTokens.toLocaleString("fr-FR")} tok
-            </div>
-            <div className="text-[11px] font-mono text-muted-foreground">
-              {totalLlmCalls} appel(s) · ${totalCostUsd.toFixed(5)} ·{" "}
-              {latest?.durationMs ?? 0} ms
-            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Table agent_actions (anti-dérapage)
+            </p>
           </div>
         </section>
 
-        {/* Onglets */}
+        {/* Onglets de travail */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <button
-            onClick={() => setTab("operations")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
-              tab === "operations"
+            type="button"
+            onClick={() => setTab("agent_pipeline")}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === "agent_pipeline"
                 ? "bg-foreground text-background"
-                : "border border-border bg-card text-muted-foreground"
+                : "border border-border bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Activity size={13} /> Ingestion, Runs & Analyse
+            <Activity size={13} /> Résultats Agent, Email &amp; Journal
           </button>
           <button
-            onClick={() => setTab("records")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
-              tab === "records"
+            type="button"
+            onClick={() => setTab("data_sources")}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === "data_sources"
                 ? "bg-foreground text-background"
-                : "border border-border bg-card text-muted-foreground"
+                : "border border-border bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Database size={13} /> Enregistrements ({records.length})
+            <Database size={13} /> Collectes CommCare / Kobo &amp; NLQ ({records.length})
           </button>
           <button
+            type="button"
             onClick={() => setTab("rules")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
               tab === "rules"
                 ? "bg-foreground text-background"
-                : "border border-border bg-card text-muted-foreground"
+                : "border border-border bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
-            <FileCode2 size={13} /> Règles YAML & Apprentissage
+            <FileCode2 size={13} /> Règles Script YAML &amp; Évaluation
             {ruleSuggestions.length > 0 ? ` (${ruleSuggestions.length})` : ""}
           </button>
         </div>
 
-        {tab === "operations" && (
+        {/* ONGLET 1 : Cœur de la Version Minimale (Anomalies, Email + Message de vérification, Journal agent_actions) */}
+        {tab === "agent_pipeline" && (
+          <div className="space-y-6">
+            {records.length === 0 && !loading && (
+              <section className="rounded-2xl border border-primary/30 bg-primary/5 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <h2 className="text-sm font-bold text-foreground">
+                    Espace prêt pour votre premier contrôle autonome
+                  </h2>
+                  <p className="text-xs text-muted-foreground max-w-2xl">
+                    Injectez en un clic un export CommCare/Kobo anonymisé contenant les 4 cas
+                    d&apos;erreurs (doublons + cas ambigu, âge aberrant 178 ans, GPS hors zone,
+                    copier-coller enquêteur ENQ-04) pour voir l&apos;agent exécuter ses règles, ses
+                    appels outils, rédiger le message de vérification par email et journaliser chaque
+                    action.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleRun("demo_kobo_ingest")}
+                  disabled={runningMode !== null}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 whitespace-nowrap shrink-0"
+                >
+                  <Bot size={15} />
+                  {runningMode === "demo_kobo_ingest"
+                    ? "Exécution en cours…"
+                    : "Injecter l'export CommCare/Kobo & Lancer l'Agent"}
+                </button>
+              </section>
+            )}
+
+            {/* Split View : Anomalies par Sévérité + Résumé Email & Message de vérification */}
+            <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+              {/* Anomalies classées par sévérité */}
+              <div className="lg:col-span-7 rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">
+                      Anomalies détectées classées par sévérité ({filteredAnomalies.length})
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Doublons, âges aberrants, GPS hors zone et copier-coller enquêteurs.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      [
+                        { key: "all", label: `Toutes (${anomalies.length})` },
+                        { key: "bloquante", label: `Bloquantes (${severityCounts.bloquante})` },
+                        { key: "a_verifier", label: `À vérifier (${severityCounts.a_verifier})` },
+                        { key: "mineure", label: `Mineures (${severityCounts.mineure})` },
+                      ] as const
+                    ).map((sev) => (
+                      <button
+                        key={sev.key}
+                        type="button"
+                        onClick={() => setSeverityFilter(sev.key)}
+                        className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                          severityFilter === sev.key
+                            ? "bg-foreground text-background"
+                            : "border border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {sev.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {filteredAnomalies.length === 0 ? (
+                  <div className="flex items-center gap-2 py-4 text-xs text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 size={14} /> Aucune anomalie ouverte pour ce filtre.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                    {filteredAnomalies.map((a) => (
+                      <div
+                        key={a.id}
+                        className="rounded-xl border border-border bg-background/60 p-3.5 text-xs space-y-1.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`font-semibold uppercase ${
+                                a.severity === "bloquante"
+                                  ? "text-red-600 dark:text-red-400"
+                                  : a.severity === "a_verifier"
+                                    ? "text-amber-600 dark:text-amber-400"
+                                    : "text-primary"
+                              }`}
+                            >
+                              {a.severity}
+                            </span>
+                            <span className="text-muted-foreground">·</span>
+                            <span className="font-semibold text-foreground">
+                              {formatCategoryLabel(a.category)}
+                            </span>
+                          </div>
+                          <span className="text-muted-foreground">
+                            {a.ruleId} · {a.status}
+                          </span>
+                        </div>
+                        <p className="text-foreground leading-relaxed">{a.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between border-t border-border pt-3 text-xs">
+                  <span className="text-muted-foreground">
+                    Les cas ambigus requièrent une confirmation avant modification définitive.
+                  </span>
+                  <Link
+                    href={`/dashboard/${encodedSpaceId}/validations`}
+                    className="font-semibold text-primary hover:underline whitespace-nowrap"
+                  >
+                    Ouvrir les validations humaines
+                  </Link>
+                </div>
+              </div>
+
+              {/* Résumé envoyé par Email & Message de vérification */}
+              <div className="lg:col-span-5 rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm flex flex-col justify-between">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between border-b border-border pb-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-foreground">
+                        Résumé Email &amp; Message de Vérification
+                      </h2>
+                      <p className="text-xs text-muted-foreground">
+                        Synthèse diffusée automatiquement après chaque exécution.
+                      </p>
+                    </div>
+                    <Mail size={17} className="text-primary shrink-0" />
+                  </div>
+
+                  {activeEmail ? (
+                    <div className="space-y-3">
+                      {emailSummaries.length > 1 && (
+                        <select
+                          aria-label="Sélectionner un email envoyé"
+                          value={selectedEmailIdx}
+                          onChange={(e) => setSelectedEmailIdx(Number(e.target.value))}
+                          className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-[11px] font-mono text-foreground"
+                        >
+                          {emailSummaries.map((mail, idx) => (
+                            <option key={mail.id} value={idx}>
+                              {new Date(mail.sentAt).toLocaleTimeString("fr-FR")} — {mail.runId}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      <div className="rounded-xl border border-border bg-background/70 p-3.5 text-xs space-y-2">
+                        <div className="space-y-1 border-b border-border pb-2 font-mono text-[11px]">
+                          <div className="text-foreground font-semibold">{activeEmail.subject}</div>
+                          <div className="text-muted-foreground">
+                            Destinataire : {activeEmail.recipient}
+                          </div>
+                          <div className="text-muted-foreground">
+                            Canaux : {activeEmail.channels.join(" · ")} ·{" "}
+                            {activeEmail.emailSent
+                              ? `SMTP/Resend (${activeEmail.emailProvider})`
+                              : "Aperçu & Journal prêts (configurez SMTP/Resend pour envoi externe)"}
+                          </div>
+                        </div>
+
+                        <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-foreground">
+                          {activeEmail.summaryText}
+                        </pre>
+                      </div>
+                    </div>
+                  ) : latest?.summaryText ? (
+                    <div className="rounded-xl border border-border bg-background/70 p-3.5 text-xs space-y-2">
+                      <p className="font-mono text-[11px] text-muted-foreground">
+                        Run : {latest.id} · Déclencheur : {latest.trigger}
+                      </p>
+                      <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-foreground">
+                        {latest.summaryText}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground py-4">
+                      Aucun résumé envoyé pour le moment. Lancez un contrôle ou injectez l&apos;export CommCare/Kobo.
+                    </p>
+                  )}
+                </div>
+
+                {latest && (
+                  <div className="rounded-lg border border-border bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground space-y-1">
+                    <div>
+                      Dernier run : {latest.id} ({latest.status})
+                    </div>
+                    <div>
+                      Fournisseur : {latest.llmProvider || "deterministic"}/
+                      {latest.llmModel || "rules-fallback-v1"} · {latest.durationMs ?? 0} ms
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Pilier 5 : Journal d'actions de l'agent (Détection des dérapages) */}
+            <section className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    Journal des Actions de l&apos;Agent (agent_actions — Détection des dérapages)
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    Chaque appel d&apos;outil, requête LLM, fusion, garde-fou et notification est
+                    enregistré avec niveau de confiance et possibilité d&apos;annulation (rollback).
+                  </p>
+                </div>
+                <Link
+                  href={`/dashboard/${encodedSpaceId}/historique`}
+                  className="text-xs font-semibold text-primary hover:underline"
+                >
+                  Journal complet &amp; audit
+                </Link>
+              </div>
+
+              {actions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Aucune action enregistrée dans le journal pour le moment.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
+                      <tr>
+                        <th className="py-2 pr-3">Horodatage</th>
+                        <th className="py-2 pr-3">Outil / Action</th>
+                        <th className="py-2 pr-3">Auteur</th>
+                        <th className="py-2 pr-3">Décision tracée</th>
+                        <th className="py-2 pr-3">Confiance</th>
+                        <th className="py-2 pr-3">Modèle / Tokens</th>
+                        <th className="py-2 text-right">Contrôle / Rollback</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {actions.slice(0, 15).map((act) => (
+                        <tr key={act.id}>
+                          <td className="py-2.5 pr-3 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                            {new Date(act.timestamp).toLocaleTimeString("fr-FR")}
+                          </td>
+                          <td className="py-2.5 pr-3 font-mono font-semibold text-[11px] text-primary">
+                            {act.toolName}
+                          </td>
+                          <td className="py-2.5 pr-3 font-mono text-[11px] uppercase">
+                            {act.author}
+                          </td>
+                          <td className="py-2.5 pr-3 text-foreground max-w-md">{act.decision}</td>
+                          <td className="py-2.5 pr-3 font-mono text-[11px] tabular-nums">
+                            {(act.confidence * 100).toFixed(0)} %
+                          </td>
+                          <td className="py-2.5 pr-3 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                            {act.llmProvider || "script"} · {act.tokensUsed ?? 0} tok
+                          </td>
+                          <td className="py-2.5 text-right whitespace-nowrap">
+                            {act.reverted ? (
+                              <span className="font-mono text-[11px] text-amber-600 dark:text-amber-400">
+                                ANNULÉE
+                              </span>
+                            ) : act.reversible ? (
+                              <button
+                                type="button"
+                                disabled={revertingId === act.id}
+                                onClick={() => void handleRollback(act.id)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                              >
+                                <RotateCcw size={11} />
+                                {revertingId === act.id ? "Rollback…" : "Annuler"}
+                              </button>
+                            ) : (
+                              <span className="font-mono text-[11px] text-muted-foreground">
+                                Lecture / Log
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* ONGLET 2 : Collectes CommCare / Kobo / CSV & NLQ */}
+        {tab === "data_sources" && (
           <div className="space-y-6">
             {mealIndicators && (
               <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -527,7 +922,9 @@ export default function DashboardSpacePage() {
                     <div className="text-muted-foreground">Alertes copier-coller</div>
                     <div
                       className={`text-lg font-bold font-mono ${
-                        mealIndicators.copyPasteAlerts > 0 ? "text-red-600" : "text-emerald-600"
+                        mealIndicators.copyPasteAlerts > 0
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-emerald-600 dark:text-emerald-400"
                       }`}
                     >
                       {mealIndicators.copyPasteAlerts}
@@ -547,7 +944,6 @@ export default function DashboardSpacePage() {
               </section>
             )}
 
-            {/* Sources + Upload */}
             <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2 rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -559,12 +955,14 @@ export default function DashboardSpacePage() {
                   </div>
                   <div className="flex gap-2">
                     <button
+                      type="button"
                       onClick={() => setShowJsonForm((v) => !v)}
                       className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium"
                     >
                       <Upload size={12} /> JSON / Kobo
                     </button>
                     <button
+                      type="button"
                       onClick={() => setShowConnectorForm((v) => !v)}
                       className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium"
                     >
@@ -648,9 +1046,7 @@ export default function DashboardSpacePage() {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-foreground">{src.name}</span>
-                        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px]">
-                          {src.status}
-                        </span>
+                        <span className="font-mono text-[10px] text-primary">{src.status}</span>
                       </div>
                       <div className="font-mono text-[11px] text-muted-foreground">
                         {src.type.toUpperCase()}
@@ -696,7 +1092,7 @@ export default function DashboardSpacePage() {
               </form>
             </section>
 
-            {/* Assistant Questions en Langage Naturel (FR / Malagasy) */}
+            {/* NLQ Français / Malagasy */}
             <section className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -705,7 +1101,7 @@ export default function DashboardSpacePage() {
                     Questions en langage naturel (Français / Malagasy)
                   </h2>
                 </div>
-                <span className="rounded border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                <span className="font-mono text-[11px] text-muted-foreground">
                   Lecture seule · Périmètre {spaceId}
                 </span>
               </div>
@@ -767,109 +1163,75 @@ export default function DashboardSpacePage() {
               )}
             </section>
 
-            {/* Runs (Observabilité) & Anomalies */}
-            {loading ? (
-              <p className="text-xs text-muted-foreground">Chargement…</p>
-            ) : (
-              <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <div className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
-                  <h2 className="text-sm font-semibold">
-                    Derniers runs & observabilité ({runs.length})
-                  </h2>
-                  {runs.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Aucun run enregistré.</p>
-                  ) : (
-                    <div className="space-y-2.5 max-h-[420px] overflow-y-auto">
-                      {runs.map((r) => (
-                        <div key={r.id} className="rounded-lg border border-border p-3 text-xs space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono font-semibold">{r.id}</span>
-                            <span className="rounded border border-border px-2 py-0.5 font-mono text-[10px]">
-                              {r.status}
-                            </span>
-                          </div>
-                          <div className="font-mono text-[11px] text-muted-foreground">
-                            Déclencheur : {r.trigger} · Auto : {r.autoActionsCount} · Validation :{" "}
-                            {r.pendingValidationsCount}
-                          </div>
-                          <div className="font-mono text-[11px] text-primary">
-                            Durée : {r.durationMs ?? 0} ms · Appels LLM : {r.llmCallsCount ?? 0} (
-                            {r.llmProvider || "deterministic"}/{r.llmModel || "rules-fallback-v1"}) ·{" "}
-                            {r.tokensUsed || 0} tok · ${(r.estimatedCostUsd || 0).toFixed(6)}
-                          </div>
-                          {r.summaryText && <p className="text-foreground">{r.summaryText}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+            {/* Enregistrements normalisés */}
+            <section className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
+              <h2 className="text-sm font-semibold">
+                Enregistrements normalisés ({records.length} — aucune suppression physique)
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
+                    <tr>
+                      <th className="py-2 pr-3">ID externe</th>
+                      <th className="py-2 pr-3">Nom complet</th>
+                      <th className="py-2 pr-3">Enquêteur</th>
+                      <th className="py-2 pr-3">Téléphone</th>
+                      <th className="py-2 pr-3">Âge</th>
+                      <th className="py-2 pr-3">GPS / Zone</th>
+                      <th className="py-2">Statut</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {records.slice(0, 100).map((rec) => (
+                      <tr key={rec.id}>
+                        <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">
+                          {rec.externalId}
+                        </td>
+                        <td className="py-2 pr-3 font-medium">{rec.fullName || "—"}</td>
+                        <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">
+                          {rec.enumeratorId || "—"}
+                        </td>
+                        <td className="py-2 pr-3 font-mono text-[11px]">{rec.phone || "—"}</td>
+                        <td className="py-2 pr-3 font-mono text-[11px]">{rec.age ?? "—"}</td>
+                        <td className="py-2 pr-3 font-mono text-[11px]">
+                          {rec.zone || "—"}
+                          {rec.latitude !== null && rec.longitude !== null
+                            ? ` (${rec.latitude.toFixed(3)}, ${rec.longitude.toFixed(3)})`
+                            : ""}
+                        </td>
+                        <td className="py-2 font-mono text-[11px]">{rec.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        )}
 
-                <div className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold">
-                      Anomalies ({filteredAnomalies.length})
-                    </h2>
-                    <div className="flex gap-1">
-                      {(["all", "bloquante", "a_verifier", "mineure"] as const).map((sev) => (
-                        <button
-                          key={sev}
-                          onClick={() => setSeverityFilter(sev)}
-                          className={`rounded px-2 py-1 text-[11px] font-medium ${
-                            severityFilter === sev
-                              ? "bg-foreground text-background"
-                              : "border border-border text-muted-foreground"
-                          }`}
-                        >
-                          {sev === "all" ? "Toutes" : sev}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {filteredAnomalies.length === 0 ? (
-                    <div className="flex items-center gap-2 text-xs text-emerald-600">
-                      <CheckCircle2 size={14} /> Aucune anomalie pour ce filtre.
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-[420px] overflow-y-auto">
-                      {filteredAnomalies.map((a) => (
-                        <div key={a.id} className="rounded-lg border border-border p-3 text-xs space-y-1">
-                          <div className="flex items-center justify-between gap-2 font-mono text-[11px]">
-                            <span className="font-semibold">{a.severity}</span>
-                            <span className="text-muted-foreground">
-                              {a.ruleId} · {a.status}
-                            </span>
-                          </div>
-                          <p className="text-foreground">{a.message}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </section>
-            )}
-
-            {/* Évaluation sur 10 cas imprévus */}
+        {/* ONGLET 3 : Règles YAML, Apprentissage & Évaluation Hors-Règles */}
+        {tab === "rules" && (
+          <div className="space-y-6">
             {unexpectedEval && (
               <section className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <FlaskConical size={16} className="text-primary" />
-                    <div>
-                      <h2 className="text-sm font-semibold">
-                        Évaluation sur cas imprévus ({unexpectedEval.totalUnexpectedErrors} erreurs hors YAML sur {unexpectedEval.totalRows} lignes)
-                      </h2>
-                      <p className="text-xs text-muted-foreground">
-                        Comparaison entre les règles YAML statiques et le détecteur d&apos;anomalies imprévues.
-                      </p>
-                    </div>
+                <div className="flex items-center gap-2">
+                  <FlaskConical size={16} className="text-primary" />
+                  <div>
+                    <h2 className="text-sm font-semibold">
+                      Évaluation sur cas imprévus ({unexpectedEval.totalUnexpectedErrors} erreurs
+                      hors YAML sur {unexpectedEval.totalRows} lignes)
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Comparaison entre les règles YAML statiques et le détecteur d&apos;anomalies
+                      imprévues.
+                    </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
                   <div className="rounded-lg border border-border bg-background/60 p-3">
                     <div className="text-muted-foreground">Précision (Détecteur imprévus)</div>
-                    <div className="text-xl font-bold font-mono text-emerald-600">
+                    <div className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
                       {(unexpectedEval.agentDetector.precision * 100).toFixed(0)} %
                     </div>
                   </div>
@@ -889,7 +1251,7 @@ export default function DashboardSpacePage() {
                   </div>
                   <div className="rounded-lg border border-border bg-background/60 p-3">
                     <div className="text-muted-foreground">Rappel YAML seul (baseline)</div>
-                    <div className="text-xl font-bold font-mono text-amber-600">
+                    <div className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">
                       {(unexpectedEval.yamlBaseline.recall * 100).toFixed(0)} % (
                       {unexpectedEval.yamlBaseline.truePositives}/
                       {unexpectedEval.totalUnexpectedErrors})
@@ -918,9 +1280,9 @@ export default function DashboardSpacePage() {
                           </td>
                           <td className="py-2 pr-3 font-mono text-[11px] font-semibold">
                             {c.caughtByAgent ? (
-                              <span className="text-emerald-600">Détecté</span>
+                              <span className="text-emerald-600 dark:text-emerald-400">Détecté</span>
                             ) : (
-                              <span className="text-red-600">Manqué</span>
+                              <span className="text-red-600 dark:text-red-400">Manqué</span>
                             )}
                           </td>
                           <td className="py-2 text-muted-foreground">
@@ -933,64 +1295,15 @@ export default function DashboardSpacePage() {
                 </div>
               </section>
             )}
-          </div>
-        )}
 
-        {tab === "records" && (
-          <section className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
-            <h2 className="text-sm font-semibold">
-              Enregistrements normalisés (aucune suppression physique)
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
-                  <tr>
-                    <th className="py-2 pr-3">ID externe</th>
-                    <th className="py-2 pr-3">Nom complet</th>
-                    <th className="py-2 pr-3">Enquêteur</th>
-                    <th className="py-2 pr-3">Téléphone</th>
-                    <th className="py-2 pr-3">Âge</th>
-                    <th className="py-2 pr-3">GPS / Zone</th>
-                    <th className="py-2">Statut</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {records.slice(0, 100).map((rec) => (
-                    <tr key={rec.id}>
-                      <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">
-                        {rec.externalId}
-                      </td>
-                      <td className="py-2 pr-3 font-medium">{rec.fullName || "—"}</td>
-                      <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">
-                        {rec.enumeratorId || "—"}
-                      </td>
-                      <td className="py-2 pr-3 font-mono text-[11px]">{rec.phone || "—"}</td>
-                      <td className="py-2 pr-3 font-mono text-[11px]">{rec.age ?? "—"}</td>
-                      <td className="py-2 pr-3 font-mono text-[11px]">
-                        {rec.zone || "—"}
-                        {rec.latitude !== null && rec.longitude !== null
-                          ? ` (${rec.latitude.toFixed(3)}, ${rec.longitude.toFixed(3)})`
-                          : ""}
-                      </td>
-                      <td className="py-2 font-mono text-[11px]">{rec.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {tab === "rules" && (
-          <div className="space-y-6">
-            {/* Apprentissage des décisions humaines */}
             <section className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
               <div>
                 <h2 className="text-sm font-semibold">
                   Apprentissage des décisions humaines par règle
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Chaque validation ou rejet met à jour le taux de rejet. Au-delà de 60 %, l&apos;agent propose un ajustement de seuil sans jamais modifier le YAML seul.
+                  Chaque validation ou rejet met à jour le taux de rejet. Au-delà de 60 %,
+                  l&apos;agent propose un ajustement de seuil sans jamais modifier le YAML seul.
                 </p>
               </div>
 
@@ -1001,8 +1314,9 @@ export default function DashboardSpacePage() {
                       key={s.ruleId}
                       className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs space-y-1"
                     >
-                      <div className="font-mono font-semibold text-amber-800">
-                        Suggestion : {s.ruleId} — Rejet {(s.rejectionRate * 100).toFixed(0)} % ({s.rejectedCount}/{s.totalCount})
+                      <div className="font-mono font-semibold text-amber-800 dark:text-amber-300">
+                        Suggestion : {s.ruleId} — Rejet {(s.rejectionRate * 100).toFixed(0)} % (
+                        {s.rejectedCount}/{s.totalCount})
                       </div>
                       <p className="text-foreground">{s.suggestedAction}</p>
                       <p className="text-[11px] text-muted-foreground">{s.rationale}</p>
@@ -1036,7 +1350,9 @@ export default function DashboardSpacePage() {
                           <td className="py-2 pr-3 font-mono">{fb.totalCount}</td>
                           <td
                             className={`py-2 font-mono font-semibold ${
-                              fb.rejectionRate > 0.6 ? "text-amber-600" : "text-foreground"
+                              fb.rejectionRate > 0.6
+                                ? "text-amber-600 dark:text-amber-400"
+                                : "text-foreground"
                             }`}
                           >
                             {(fb.rejectionRate * 100).toFixed(1)} %
@@ -1054,10 +1370,12 @@ export default function DashboardSpacePage() {
                 <div>
                   <h2 className="text-sm font-semibold">Configuration YAML des règles du projet</h2>
                   <p className="text-xs text-muted-foreground">
-                    Champs obligatoires, plages, déduplication et zones d&apos;intervention GPS (`geoBounds.interventionZones`).
+                    Champs obligatoires, plages, déduplication et zones d&apos;intervention GPS
+                    (`geoBounds.interventionZones`).
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => void handleSaveRules()}
                   disabled={savingRules}
                   className="rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"

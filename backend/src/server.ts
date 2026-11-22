@@ -4,6 +4,7 @@ import { createLlmProvider } from "./llm/provider";
 import { checkPgHealth, closePgPool } from "./pgStore";
 import { handleActionsRoute } from "./routes/actions";
 import { handleAuthRoute } from "./routes/auth";
+import { handleKnowledgeRoute } from "./routes/knowledge";
 import { handleRunsRoute } from "./routes/runs";
 import { handleSourcesRoute, sendJson } from "./routes/sources";
 import { startWorker, stopWorker } from "./worker";
@@ -118,6 +119,9 @@ export function createGuardianServer() {
     }
     if (url.pathname.startsWith("/api/actions") || url.pathname.startsWith("/api/validations")) {
       return handleActionsRoute(req, res, url);
+    }
+    if (url.pathname.startsWith("/api/knowledge") || url.pathname.startsWith("/api/contact")) {
+      return handleKnowledgeRoute(req, res, url);
     }
 
     return sendJson(res, 404, { message: "Route API introuvable" });

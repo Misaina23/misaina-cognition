@@ -283,9 +283,9 @@ async function runLlmToolLoop(params: {
 }): Promise<{ verdict: AgentVerdict; tokensUsed: number; costUsd: number; llmCallsCount: number }> {
   const { ctx, provider, runId, rules, runtime, openCount, recordsCount } = params;
 
-  const system = `Agent autonome Gardien de données. Données PII pseudonymisées.
-- Utilisez propose_merge (>= ${rules.duplicateDetection.nearDuplicate.autoMergeThreshold} auto, sinon validation) et request_validation pour outliers, champs vides et écarts GPS/zone d'intervention.
-- Terminez par write_summary puis répondez uniquement en JSON.`;
+  const system = `Agent autonome Gardien de données (MEAL). Données PII pseudonymisées.
+- Utilisez list_anomalies puis compare_records et propose_merge (>= ${rules.duplicateDetection.nearDuplicate.autoMergeThreshold} auto, sinon validation) et request_validation pour cas ambigus, âges aberrants, copier-coller enquêteur et écarts GPS/zone d'intervention.
+- Rédigez un message de vérification clair destiné au superviseur terrain pour les cas ambigus dans write_summary, puis répondez uniquement en JSON.`;
 
   const messages: LlmMessage[] = [
     {
@@ -452,7 +452,25 @@ async function runDeterministicAgentFallback(params: {
     actionsTaken.push(`request_validation:${anom.category}`);
   }
 
-  const summary = `Contrôle MEAL sur ${recordsCount} enregistrements (${openAnomalies.length} anomalie(s)) : ${runtime.autoActionsCount} action(s) auto, ${runtime.pendingValidationsCount} en validation humaine.`;
+  const countBySev = { bloquante: 0, a_verifier: 0, mineure: 0 };
+  for (const a of openAnomalies) countBySev[a.severity] += 1;
+
+  const verificationTargets = openAnomalies
+    .filter((a) => a.severity === "bloquante" || a.severity === "a_verifier")
+    .slice(0, 4)
+    .map((a) => `- [${a.severity.toUpperCase()}] ${a.message}`)
+    .join("\n");
+
+  const summary = [
+    `Contrôle MEAL sur ${recordsCount} enregistrements (${openAnomalies.length} anomalie(s) : ${countBySev.bloquante} bloquante(s), ${countBySev.a_verifier} à vérifier, ${countBySev.mineure} mineure(s)).`,
+    `Actions : ${runtime.autoActionsCount} action(s) automatique(s) réversible(s), ${runtime.pendingValidationsCount} dossier(s) en validation humaine.`,
+    verificationTargets
+      ? `\nMessage de vérification terrain (à confirmer par le superviseur) :\n${verificationTargets}\nMerci de vérifier les fiches concernées et de confirmer ou rejeter dans la file de validation avant clôture.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   await runtime.executeTool("write_summary", {
     summaryText: summary,
     overallConfidence: 0.9,

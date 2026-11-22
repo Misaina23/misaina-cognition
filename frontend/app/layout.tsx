@@ -15,20 +15,22 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Misaina Cognition — Plateforme MEAL autonome",
+  title: "Misaina Cognition — Moteur de Connaissance Souverain & Gouvernance RAG",
   description:
-    "Plateforme MEAL (Monitoring, Evaluation, Accountability & Learning) : contrôle qualité autonome, déduplication, GPS/zone et suivi des enquêteurs.",
+    "Plateforme d'intelligence documentaire, gouvernance RAG hybride BM25 et vecteurs denses, traçabilité cryptographique et isolation multitenant SecNumCloud et PSSI.",
   openGraph: {
-    title: "Misaina Cognition — Plateforme MEAL autonome",
+    title: "Misaina Cognition — Moteur de Connaissance Souverain & Gouvernance RAG",
     description:
-      "Plateforme MEAL (Monitoring, Evaluation, Accountability & Learning) : contrôle qualité autonome, déduplication, GPS/zone et suivi des enquêteurs.",
+      "Fédérez les silos documentaires de votre groupe dans un pipeline certifié BM25 et vecteurs denses avec traçabilité cryptographique des citations.",
   },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr" className={`${plusJakarta.variable} ${jetbrainsMono.variable}`}>
-      <body className="min-h-screen font-sans antialiased">{children}</body>
+    <html lang="fr" className={`${plusJakarta.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+      <body className="min-h-screen font-sans antialiased selection:bg-primary/20 selection:text-primary">
+        {children}
+      </body>
     </html>
   );
 }

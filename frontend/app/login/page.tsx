@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { KeyRound, Lock, ShieldAlert, UserCheck } from "lucide-react";
+import { ArrowLeft, KeyRound, Lock, ShieldCheck, UserCheck } from "lucide-react";
 import { guardianApi } from "@/lib/api";
 
 const DEMO_ACCOUNTS = [
@@ -31,7 +32,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await guardianApi.login(email.trim(), password);
-      router.replace("/");
+      router.replace("/workspace");
     } catch {
       setError("Identifiants invalides ou session refusée par le serveur.");
     } finally {
@@ -40,24 +41,38 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12 space-y-4">
+      <div>
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft size={14} /> Retour à l&apos;accueil vitrine
+        </Link>
+      </div>
+
       <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-6">
         <div className="space-y-1.5">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <ShieldAlert size={20} />
+              <ShieldCheck size={20} />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground">
-              Connexion sécurisée
-            </h1>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                Misaina Cognition
+              </p>
+              <h1 className="text-xl font-bold tracking-tight text-foreground">
+                Connexion sécurisée
+              </h1>
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Session signée par jeton JWT HS256 et cookie HttpOnly (aucun en-tête client non vérifié).
+            Session signée par jeton JWT HS256 et cookie HttpOnly avec isolation stricte par tenant.
           </p>
         </div>
 
         {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700">
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-400">
             {error}
           </div>
         )}
@@ -94,7 +109,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50 hover:opacity-90 transition-opacity"
           >
             <KeyRound size={14} />
             {loading ? "Vérification…" : "Ouvrir une session signée"}
@@ -114,7 +129,7 @@ export default function LoginPage() {
                   setEmail(acc.email);
                   setPassword(acc.hint);
                 }}
-                className="flex items-center justify-between rounded-lg border border-border bg-background/60 px-3 py-2 text-left text-[11px] hover:bg-muted"
+                className="flex items-center justify-between rounded-lg border border-border bg-background/60 px-3 py-2 text-left text-[11px] hover:bg-muted transition-colors"
               >
                 <div>
                   <div className="font-medium text-foreground">{acc.label}</div>

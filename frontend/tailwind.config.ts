@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  darkMode: "class",
   content: [
     path.join(__dirname, "app/**/*.{ts,tsx}"),
     path.join(__dirname, "components/**/*.{ts,tsx}"),

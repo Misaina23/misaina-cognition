@@ -1,13 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, History, LayoutDashboard, LogOut, ShieldCheck } from "lucide-react";
-import { guardianApi } from "@/lib/api";
-
 interface SpaceHeaderProps {
   spaceId: string;
-  activeSection: "overview" | "validations" | "historique";
+  activeSection: "overview" | "knowledge" | "validations" | "historique";
   title: string;
   subtitle: string;
   actions?: React.ReactNode;
@@ -15,91 +10,22 @@ interface SpaceHeaderProps {
 
 export function SpaceHeader({
   spaceId,
-  activeSection,
   title,
   subtitle,
   actions,
 }: SpaceHeaderProps) {
-  const router = useRouter();
-  const encoded = encodeURIComponent(spaceId);
-
-  async function handleLogout() {
-    await guardianApi.logout();
-    router.replace("/login");
-  }
-
-  const navItems = [
-    {
-      key: "overview" as const,
-      href: `/dashboard/${encoded}`,
-      label: "Vue espace",
-      icon: LayoutDashboard,
-    },
-    {
-      key: "validations" as const,
-      href: `/dashboard/${encoded}/validations`,
-      label: "Validations",
-      icon: ShieldCheck,
-    },
-    {
-      key: "historique" as const,
-      href: `/dashboard/${encoded}/historique`,
-      label: "Historique",
-      icon: History,
-    },
-  ];
-
   return (
-    <header className="border-b border-border bg-card/80 backdrop-blur-sm">
-      <div className="mx-auto max-w-7xl px-6 py-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Link
-                href="/"
-                className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
-              >
-                <ArrowLeft size={13} /> Tous les espaces
-              </Link>
-              <span>/</span>
-              <span className="font-mono text-foreground">{spaceId}</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">{title}</h1>
-            <p className="text-xs text-muted-foreground">{subtitle}</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {actions}
-            <button
-              onClick={() => void handleLogout()}
-              className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-              title="Fermer la session"
-            >
-              <LogOut size={13} /> Déconnexion
-            </button>
-          </div>
+    <header className="border-b border-border bg-card/75 backdrop-blur-sm">
+      <div className="mx-auto max-w-7xl px-6 py-5 flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-1">
+          <p className="font-mono text-[11px] uppercase tracking-wider text-primary">
+            Périmètre {spaceId}
+          </p>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">{title}</h1>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
 
-        <nav className="flex flex-wrap items-center gap-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = activeSection === item.key;
-            return (
-              <Link
-                key={item.key}
-                href={item.href}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                  active
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "border border-border bg-background text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Icon size={14} />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
+        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
     </header>
   );

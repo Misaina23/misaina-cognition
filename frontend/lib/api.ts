@@ -367,14 +367,23 @@ export const guardianApi = {
         spaceId: string;
         runs: DataRun[];
         anomalies: Anomaly[];
+        emailSummaries?: RunEmailSummary[];
+        automation?: AutomationStatus;
         mealIndicators?: MealIndicators;
       }>("/runs", {
         params: { spaceId },
       })
       .then((r) => r.data),
 
-  triggerRun: (spaceId: string, mode: "agent" | "nightly" | "autonomous_sync" = "agent") =>
-    api.post("/runs", { spaceId, mode }).then((r) => r.data),
+  triggerRun: (
+    spaceId: string,
+    mode:
+      | "agent"
+      | "nightly"
+      | "autonomous_sync"
+      | "demo_kobo_ingest"
+      | "inbox_drop" = "agent"
+  ) => api.post("/runs", { spaceId, mode }).then((r) => r.data),
 
   getRecords: (spaceId: string, includeArchived = true) =>
     api
@@ -429,4 +438,218 @@ export const guardianApi = {
     api.get<{ actions: AgentAction[] }>("/actions", { params: { spaceId } }).then((r) => r.data),
   rollbackAction: (spaceId: string, actionId: string) =>
     api.post("/actions", { spaceId, actionId }).then((r) => r.data),
+
+  // Sovereign Knowledge Engine (RAG BM25 + Vecteurs Denses + Cryptographic Citations)
+  getKnowledgeDocuments: (spaceId: string) =>
+    api
+      .get<{ tenantId: string; spaceId: string; documents: KnowledgeDocument[] }>(
+        "/knowledge/documents",
+        { params: { spaceId } }
+      )
+      .then((r) => r.data),
+
+  ingestKnowledgeDocument: (payload: {
+    spaceId: string;
+    title: string;
+    fileName: string;
+    content: string;
+    department?: string;
+    classification: ClassificationLevel;
+  }) =>
+    api
+      .post<{ document: KnowledgeDocument }>("/knowledge/documents", payload)
+      .then((r) => r.data),
+
+  deleteKnowledgeDocument: (spaceId: string, documentId: string) =>
+    api
+      .delete<{ deleted: boolean; id: string }>(
+        `/knowledge/documents/${encodeURIComponent(documentId)}`,
+        { params: { spaceId } }
+      )
+      .then((r) => r.data),
+
+  queryKnowledge: (payload: {
+    spaceId: string;
+    question: string;
+    clearanceFilter?: ClassificationLevel | "ALL";
+  }) => api.post<KnowledgeQueryResult>("/knowledge/query", payload).then((r) => r.data),
+
+  getKnowledgeQueries: (spaceId: string) =>
+    api
+      .get<{ queries: KnowledgeQueryResult[] }>("/knowledge/queries", { params: { spaceId } })
+      .then((r) => r.data),
+
+  verifyCitationProof: (payload: {
+    spaceId: string;
+    chunkHash: string;
+    queryHash: string;
+    sealedAt: string;
+    proofReceipt: string;
+  }) => api.post<ProofVerificationResult>("/knowledge/verify-proof", payload).then((r) => r.data),
+
+  exportBriefingDocx: async (payload: {
+    spaceId: string;
+    question: string;
+    answer: string;
+    queryHash: string;
+    merkleProofRoot: string;
+    citations: CryptographicCitation[];
+  }): Promise<{ blob: Blob; fileName: string }> => {
+    const resp = await api.post<Blob>("/knowledge/export-docx", payload, {
+      responseType: "blob",
+    });
+    const cd = String(resp.headers["content-disposition"] || "");
+    const match = /filename="([^"]+)"/.exec(cd);
+    return {
+      blob: resp.data,
+      fileName: match?.[1] || `synthese-certifiee-${payload.spaceId}.docx`,
+    };
+  },
+
+  getKnowledgeAudit: (spaceId: string) =>
+    api
+      .get<{
+        tenantId: string;
+        spaceId: string;
+        audit: AuditLedgerEntry[];
+        compliance: ComplianceMetrics;
+      }>("/knowledge/audit", { params: { spaceId } })
+      .then((r) => r.data),
+
+  submitEnterpriseContact: (payload: {
+    organization: string;
+    contactName: string;
+    email: string;
+    employeeCount: string;
+    deploymentMode: "SecNumCloud" | "On-Premise" | "Hybride";
+    message: string;
+  }) =>
+    api
+      .post<{ ticketId: string; status: string; message: string; createdAt: string }>(
+        "/contact/enterprise",
+        payload
+      )
+      .then((r) => r.data),
 };
+
+export type ClassificationLevel = "PUBLIC" | "INTERNE" | "RESTREINT" | "CONFIDENTIEL";
+
+export interface KnowledgeChunk {
+  id: string;
+  documentId: string;
+  documentTitle: string;
+  pageNumber: number;
+  chunkIndex: number;
+  content: string;
+  excerpt: string;
+  chunkHash: string;
+}
+
+export interface KnowledgeDocument {
+  id: string;
+  tenantId: string;
+  spaceId: string;
+  title: string;
+  fileName: string;
+  department: string;
+  classification: ClassificationLevel;
+  version: number;
+  sizeBytes: number;
+  documentHash: string;
+  merkleRoot: string;
+  uploadedBy: string;
+  createdAt: string;
+  chunks: KnowledgeChunk[];
+}
+
+export interface CryptographicCitation {
+  citationIndex: number;
+  documentId: string;
+  documentTitle: string;
+  classification: ClassificationLevel;
+  pageNumber: number;
+  chunkIndex: number;
+  excerpt: string;
+  bm25Score: number;
+  vectorScore: number;
+  rrfScore: number;
+  chunkHash: string;
+  documentHash: string;
+  proofReceipt: string;
+  sealedAt: string;
+}
+
+export interface KnowledgeQueryResult {
+  queryId: string;
+  queryHash: string;
+  merkleProofRoot: string;
+  answer: string;
+  citations: CryptographicCitation[];
+  confidence: number;
+  bm25LatencyMs: number;
+  vectorLatencyMs: number;
+  totalLatencyMs: number;
+  llmProvider: string;
+  llmModel: string;
+  tenantId: string;
+  spaceId: string;
+  clearanceApplied: string;
+  createdAt: string;
+}
+
+export interface ProofVerificationResult {
+  valid: boolean;
+  algorithm: string;
+  chunkFoundInTenant: boolean;
+  documentTitle?: string;
+  classification?: ClassificationLevel;
+  chunkHash: string;
+  verifiedAt: string;
+}
+
+export interface AuditLedgerEntry {
+  id: string;
+  tenantId: string;
+  spaceId: string;
+  actorEmail: string;
+  actorRole: string;
+  action: string;
+  classification: ClassificationLevel;
+  resourceSummary: string;
+  latencyMs: number;
+  prevEventHash: string;
+  eventHash: string;
+  timestamp: string;
+}
+
+export interface ComplianceMetrics {
+  tenantId: string;
+  spaceId: string;
+  documentsCount: number;
+  chunksCount: number;
+  queriesCount: number;
+  auditEntriesCount: number;
+  avgLatencyMs: number;
+  secNumCloudControls: Array<{ code: string; label: string; status: string }>;
+}
+
+export interface RunEmailSummary {
+  id: string;
+  tenantId: string;
+  spaceId: string;
+  runId: string;
+  subject: string;
+  recipient: string;
+  channels: string[];
+  emailSent: boolean;
+  emailProvider?: "resend" | "smtp";
+  summaryText: string;
+  sentAt: string;
+}
+
+export interface AutomationStatus {
+  nightlyCron: string;
+  pollingCron: string;
+  inboxWatched: boolean;
+}
+
