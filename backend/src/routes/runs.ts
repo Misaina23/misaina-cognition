@@ -18,6 +18,7 @@ export async function handleRunsRoute(
   url: URL
 ): Promise<void> {
   try {
+    await journalRepo.ensureReady();
     if (url.pathname === "/api/rules") {
       if (req.method === "GET") {
         const { ctx } = resolveHttpContext(req, url);
@@ -28,6 +29,7 @@ export async function handleRunsRoute(
         const body = (await readJsonBody(req)) as { spaceId?: string; yaml?: string };
         const { ctx } = resolveHttpContext(req, url, body.spaceId);
         const saved = journalRepo.setProjectRulesYaml(ctx, body.yaml || "");
+        await journalRepo.flushPg();
         return sendJson(res, 200, { tenantId: ctx.tenantId, spaceId: ctx.spaceId, ...saved });
       }
     }
@@ -53,14 +55,19 @@ export async function handleRunsRoute(
       const body = TriggerRunSchema.parse(await readJsonBody(req));
       if (body.mode === "nightly") {
         resolveHttpContext(req, url, body.spaceId);
-        return sendJson(res, 200, runNightlyCheckAllSpaces());
+        const summary = runNightlyCheckAllSpaces();
+        await journalRepo.flushPg();
+        return sendJson(res, 200, summary);
       }
       const { ctx } = resolveHttpContext(req, url, body.spaceId);
       const sourceId = body.sourceId || journalRepo.listSources(ctx)[0]?.id || "manual";
       if (body.mode === "deterministic") {
-        return sendJson(res, 200, executeDeterministicRun(ctx, { sourceId, trigger: "manual" }));
+        const resDet = executeDeterministicRun(ctx, { sourceId, trigger: "manual" });
+        await journalRepo.flushPg();
+        return sendJson(res, 200, resDet);
       }
       const agentRes = await runGuardianAgent(ctx, { sourceId, trigger: "manual" });
+      await journalRepo.flushPg();
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,

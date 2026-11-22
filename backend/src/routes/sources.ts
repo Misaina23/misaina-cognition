@@ -62,6 +62,7 @@ export async function handleSourcesRoute(
   url: URL
 ): Promise<void> {
   try {
+    await journalRepo.ensureReady();
     if (url.pathname === "/api/spaces" && req.method === "GET") {
       const userHeader = req.headers["x-user-id"];
       const user = getPrincipalByIdOrHeader(Array.isArray(userHeader) ? userHeader[0] : userHeader);
@@ -74,6 +75,8 @@ export async function handleSourcesRoute(
       const body = (await readJsonBody(req)) as { name?: string; description?: string };
       const ctx = resolveContextForUser(user);
       const space = createUserSpace(ctx.tenantId, user.id, body.name || "Nouvel espace", body.description);
+      journalRepo.syncSpacePg(space);
+      await journalRepo.flushPg();
       return sendJson(res, 201, { space });
     }
 
@@ -111,7 +114,7 @@ export async function handleSourcesRoute(
           },
           ctx
         );
-      } else if (body.rawItems) {
+      } else if (body.rawItems || source.type === "commcare" || (source.type === "generic" && source.endpointUrl)) {
         const connector =
           source.type === "commcare"
             ? new CommCareConnector()
@@ -123,13 +126,14 @@ export async function handleSourcesRoute(
           ctx
         );
       } else {
-        return sendJson(res, 400, { message: "csvText, fileBase64 ou rawItems requis." });
+        return sendJson(res, 400, { message: "csvText, fileBase64, rawItems ou endpointUrl requis." });
       }
 
       const agentRes = await runGuardianAgent(ctx, {
         sourceId: source.id,
         trigger: "upload",
       });
+      await journalRepo.flushPg();
 
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
@@ -155,6 +159,7 @@ export async function handleSourcesRoute(
         columnMapping: body.columnMapping,
         status: "ACTIVE",
       });
+      await journalRepo.flushPg();
       return sendJson(res, 201, { source });
     }
 

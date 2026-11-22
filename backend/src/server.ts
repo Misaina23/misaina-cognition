@@ -1,10 +1,11 @@
 import http from "node:http";
+import { checkPgHealth, closePgPool } from "./pgStore";
 import { handleActionsRoute } from "./routes/actions";
 import { handleRunsRoute } from "./routes/runs";
 import { handleSourcesRoute, sendJson } from "./routes/sources";
-import { startWorker } from "./worker";
+import { startWorker, stopWorker } from "./worker";
 
-const PORT = Number(process.env.PORT || 4000);
+const PORT = Number(process.env.BACKEND_PORT || process.env.PORT || 4000);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 
 export function createGuardianServer() {
@@ -22,7 +23,12 @@ export function createGuardianServer() {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
     if (url.pathname === "/api/health") {
-      return sendJson(res, 200, { status: "ok", service: "gardien-donnees-backend" });
+      const health = await checkPgHealth();
+      return sendJson(res, health.ok ? 200 : 503, {
+        status: health.ok ? "ok" : "error",
+        service: "gardien-donnees-backend",
+        storage: health.storage,
+      });
     }
     if (url.pathname.startsWith("/api/sources") || url.pathname.startsWith("/api/spaces")) {
       return handleSourcesRoute(req, res, url);
@@ -45,7 +51,17 @@ export function createGuardianServer() {
 if (require.main === module) {
   startWorker();
   const server = createGuardianServer();
-  server.listen(PORT, () => {
-    console.log(`Backend Gardien de données démarré sur http://localhost:${PORT}`);
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Backend Gardien de données démarré sur http://0.0.0.0:${PORT}`);
   });
+
+  const shutdown = async () => {
+    await stopWorker();
+    server.close(async () => {
+      await closePgPool();
+      process.exit(0);
+    });
+  };
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 }

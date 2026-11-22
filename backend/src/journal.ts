@@ -13,6 +13,22 @@ import type {
 } from "./connectors/types";
 import { parseProjectRulesYaml, type ProjectRulesConfig } from "./rules/engine";
 import { tenantSpacesRegistry } from "./tenant";
+import {
+  enqueuePgTask,
+  flushPgQueue,
+  initAndHydrateFromPg,
+  insertRawRecordPg,
+  isPgEnabled,
+  replaceOpenAnomaliesPg,
+  upsertAgentActionPg,
+  upsertAnomalyPg,
+  upsertNormalizedRecordPg,
+  upsertProjectRulesPg,
+  upsertRunPg,
+  upsertSourcePg,
+  upsertSpacePg,
+  upsertValidationItemPg,
+} from "./pgStore";
 
 interface JournalState {
   sources: DataSourceConfig[];
@@ -66,6 +82,100 @@ function getBackendRoot(): string {
   const cwd = process.cwd();
   if (fs.existsSync(path.join(cwd, "config", "projects"))) return cwd;
   return path.join(cwd, "backend");
+}
+
+function isPersistenceDisabled(): boolean {
+  if (process.env.GUARDIAN_DISABLE_DISK_STATE === "1") return true;
+  return process.argv.some((arg) =>
+    /[/\\](tests|scripts)[/\\]|evaluate\.|idempotence\.test|isolation\.test/.test(arg)
+  );
+}
+
+function getJournalStateFilePath(): string {
+  return path.join(getBackendRoot(), "data", "journal-state.json");
+}
+
+function deepFreeze<T>(obj: T): T {
+  if (obj && typeof obj === "object" && !Object.isFrozen(obj)) {
+    Object.freeze(obj);
+    for (const val of Object.values(obj as Record<string, unknown>)) deepFreeze(val);
+  }
+  return obj;
+}
+
+let journalHydrated = false;
+let journalPgHydrated = false;
+
+function hydrateStateOnce(): void {
+  if (journalHydrated) return;
+  journalHydrated = true;
+  if (isPersistenceDisabled() || isPgEnabled()) return;
+
+  const filePath = getJournalStateFilePath();
+  if (!fs.existsSync(filePath)) return;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      spaces?: typeof tenantSpacesRegistry;
+      sources?: DataSourceConfig[];
+      rawRecords?: RawRecord[];
+      normalizedRecords?: NormalizedRecord[];
+      runs?: DataRun[];
+      anomalies?: Anomaly[];
+      agentActions?: AgentAction[];
+      validationQueue?: ValidationItem[];
+      rulesYamlBySpace?: Array<[string, string]>;
+    };
+    if (Array.isArray(parsed.spaces) && parsed.spaces.length > 0) {
+      tenantSpacesRegistry.splice(0, tenantSpacesRegistry.length, ...parsed.spaces);
+    }
+    if (Array.isArray(parsed.sources)) state.sources = parsed.sources;
+    if (Array.isArray(parsed.rawRecords)) {
+      state.rawRecords = parsed.rawRecords.map((r) =>
+        Object.freeze({ ...r, rawPayload: deepFreeze({ ...r.rawPayload }) })
+      );
+    }
+    if (Array.isArray(parsed.normalizedRecords)) state.normalizedRecords = parsed.normalizedRecords;
+    if (Array.isArray(parsed.runs)) state.runs = parsed.runs;
+    if (Array.isArray(parsed.anomalies)) state.anomalies = parsed.anomalies;
+    if (Array.isArray(parsed.agentActions)) state.agentActions = parsed.agentActions;
+    if (Array.isArray(parsed.validationQueue)) state.validationQueue = parsed.validationQueue;
+    if (Array.isArray(parsed.rulesYamlBySpace)) {
+      state.rulesYamlBySpace = new Map(parsed.rulesYamlBySpace);
+    }
+  } catch (err) {
+    console.error("Impossible de restaurer backend/data/journal-state.json :", err);
+  }
+}
+
+function persistStateToDisk(): void {
+  if (isPersistenceDisabled() || isPgEnabled()) return;
+  try {
+    const filePath = getJournalStateFilePath();
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const tmpPath = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(
+      tmpPath,
+      JSON.stringify(
+        {
+          spaces: tenantSpacesRegistry,
+          sources: state.sources,
+          rawRecords: state.rawRecords,
+          normalizedRecords: state.normalizedRecords,
+          runs: state.runs,
+          anomalies: state.anomalies,
+          agentActions: state.agentActions,
+          validationQueue: state.validationQueue,
+          rulesYamlBySpace: Array.from(state.rulesYamlBySpace.entries()),
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    console.error("Erreur sauvegarde backend/data/journal-state.json :", err);
+  }
 }
 
 export function getSpaceDiskDirs(ctx: TenantSpaceContext): {
@@ -128,13 +238,67 @@ export function moveInboxFile(
 }
 
 export const journalRepo = {
+  async ensureReady(): Promise<void> {
+    if (journalPgHydrated || !isPgEnabled()) {
+      hydrateStateOnce();
+      return;
+    }
+    const snap = await initAndHydrateFromPg({
+      spaces: tenantSpacesRegistry,
+      sources: state.sources,
+    });
+    if (snap) {
+      if (snap.spaces.length > 0) {
+        tenantSpacesRegistry.splice(0, tenantSpacesRegistry.length, ...snap.spaces);
+      }
+      state.sources = snap.sources;
+      state.rawRecords = snap.rawRecords.map((r) =>
+        Object.freeze({ ...r, rawPayload: deepFreeze({ ...r.rawPayload }) })
+      );
+      state.normalizedRecords = snap.normalizedRecords;
+      state.rulesYamlBySpace = new Map(snap.rulesYaml);
+      state.runs = snap.runs;
+      state.anomalies = snap.anomalies;
+      state.validationQueue = snap.validations;
+      state.agentActions = snap.agentActions;
+      journalPgHydrated = true;
+      journalHydrated = true;
+    }
+  },
+
+  async flushPg(): Promise<void> {
+    await flushPgQueue();
+  },
+
+  persistState(): void {
+    persistStateToDisk();
+  },
+
+  syncSpacePg(space: (typeof tenantSpacesRegistry)[number]): void {
+    enqueuePgTask((pool) => upsertSpacePg(pool, space));
+  },
+
+  syncRecordPg(rec: NormalizedRecord): void {
+    enqueuePgTask((pool) => upsertNormalizedRecordPg(pool, rec));
+  },
+
+  syncActionPg(action: AgentAction): void {
+    enqueuePgTask((pool) => upsertAgentActionPg(pool, action));
+  },
+
+  syncValidationPg(item: ValidationItem): void {
+    enqueuePgTask((pool) => upsertValidationItemPg(pool, item));
+  },
+
   listSources(ctx: TenantSpaceContext): DataSourceConfig[] {
+    hydrateStateOnce();
     return state.sources.filter(
       (s) => s.tenantId === ctx.tenantId && s.spaceId === ctx.spaceId
     );
   },
 
   getSource(ctx: TenantSpaceContext, sourceId: string): DataSourceConfig | null {
+    hydrateStateOnce();
     return (
       state.sources.find(
         (s) => s.id === sourceId && s.tenantId === ctx.tenantId && s.spaceId === ctx.spaceId
@@ -148,9 +312,12 @@ export const journalRepo = {
       recordsCount?: number;
     }
   ): DataSourceConfig {
+    hydrateStateOnce();
     const existing = this.getSource(ctx, input.id);
     if (existing) {
       Object.assign(existing, input, { tenantId: ctx.tenantId, spaceId: ctx.spaceId });
+      enqueuePgTask((pool) => upsertSourcePg(pool, existing));
+      persistStateToDisk();
       return existing;
     }
     const created: DataSourceConfig = {
@@ -161,6 +328,8 @@ export const journalRepo = {
       createdAt: new Date().toISOString(),
     };
     state.sources.push(created);
+    enqueuePgTask((pool) => upsertSourcePg(pool, created));
+    persistStateToDisk();
     return created;
   },
 
@@ -170,6 +339,7 @@ export const journalRepo = {
     name: string,
     extra?: Partial<DataSourceConfig>
   ): DataSourceConfig {
+    hydrateStateOnce();
     const existing = state.sources.find(
       (s) =>
         s.tenantId === ctx.tenantId &&
@@ -190,6 +360,8 @@ export const journalRepo = {
       ...extra,
     };
     state.sources.push(created);
+    enqueuePgTask((pool) => upsertSourcePg(pool, created));
+    persistStateToDisk();
     return created;
   },
 
@@ -199,6 +371,7 @@ export const journalRepo = {
     externalId: string,
     payloadHash: string
   ): RawRecord | null {
+    hydrateStateOnce();
     return (
       state.rawRecords.find(
         (r) =>
@@ -216,29 +389,29 @@ export const journalRepo = {
     raw: RawRecord,
     normalized: NormalizedRecord
   ): RawRecord {
+    hydrateStateOnce();
     if (raw.tenantId !== ctx.tenantId || raw.spaceId !== ctx.spaceId) {
       throw new Error("Violation d'isolation : RawRecord hors contexte.");
     }
     if (normalized.tenantId !== ctx.tenantId || normalized.spaceId !== ctx.spaceId) {
       throw new Error("Violation d'isolation : NormalizedRecord hors contexte.");
     }
-    const deepFreeze = <T>(obj: T): T => {
-      if (obj && typeof obj === "object" && !Object.isFrozen(obj)) {
-        Object.freeze(obj);
-        for (const val of Object.values(obj as Record<string, unknown>)) deepFreeze(val);
-      }
-      return obj;
-    };
     const frozenRaw: RawRecord = Object.freeze({
       ...raw,
       rawPayload: deepFreeze({ ...raw.rawPayload }),
     });
     state.rawRecords.push(frozenRaw);
     state.normalizedRecords.push(normalized);
+    enqueuePgTask(async (pool) => {
+      await insertRawRecordPg(pool, frozenRaw);
+      await upsertNormalizedRecordPg(pool, normalized);
+    });
+    persistStateToDisk();
     return frozenRaw;
   },
 
   listRawRecords(ctx: TenantSpaceContext): RawRecord[] {
+    hydrateStateOnce();
     return state.rawRecords.filter(
       (r) => r.tenantId === ctx.tenantId && r.spaceId === ctx.spaceId
     );
@@ -248,6 +421,7 @@ export const journalRepo = {
     ctx: TenantSpaceContext,
     options?: { includeArchived?: boolean; sourceId?: string }
   ): NormalizedRecord[] {
+    hydrateStateOnce();
     return state.normalizedRecords.filter((r) => {
       if (r.tenantId !== ctx.tenantId || r.spaceId !== ctx.spaceId) return false;
       if (options?.sourceId && r.sourceId !== options.sourceId) return false;
@@ -257,6 +431,7 @@ export const journalRepo = {
   },
 
   getNormalizedRecord(ctx: TenantSpaceContext, recordId: string): NormalizedRecord | null {
+    hydrateStateOnce();
     return (
       state.normalizedRecords.find(
         (r) => r.id === recordId && r.tenantId === ctx.tenantId && r.spaceId === ctx.spaceId
@@ -269,6 +444,7 @@ export const journalRepo = {
     sourceId: string,
     patch: Partial<Pick<DataSourceConfig, "lastCursorDate" | "lastCursorId" | "lastSyncAt" | "status">>
   ): void {
+    hydrateStateOnce();
     const src = this.getSource(ctx, sourceId);
     if (!src) return;
     Object.assign(src, patch);
@@ -279,9 +455,12 @@ export const journalRepo = {
         r.sourceId === sourceId &&
         r.status === "active"
     ).length;
+    enqueuePgTask((pool) => upsertSourcePg(pool, src));
+    persistStateToDisk();
   },
 
   getProjectRules(ctx: TenantSpaceContext): { rawYaml: string; config: ProjectRulesConfig } {
+    hydrateStateOnce();
     const key = `${ctx.tenantId}::${ctx.spaceId}`;
     let rawYaml = state.rulesYamlBySpace.get(key);
     if (!rawYaml) {
@@ -295,12 +474,16 @@ export const journalRepo = {
     ctx: TenantSpaceContext,
     yamlText: string
   ): { rawYaml: string; config: ProjectRulesConfig } {
+    hydrateStateOnce();
     const parsed = parseProjectRulesYaml(yamlText);
     state.rulesYamlBySpace.set(`${ctx.tenantId}::${ctx.spaceId}`, parsed.rawYaml);
+    enqueuePgTask((pool) => upsertProjectRulesPg(pool, ctx.tenantId, ctx.spaceId, parsed.rawYaml));
+    persistStateToDisk();
     return parsed;
   },
 
   listAllSpaceContexts(): TenantSpaceContext[] {
+    hydrateStateOnce();
     return tenantSpacesRegistry.map((s) => ({
       tenantId: s.tenantId,
       spaceId: s.id,
@@ -309,30 +492,40 @@ export const journalRepo = {
   },
 
   createRun(ctx: TenantSpaceContext, run: DataRun): DataRun {
+    hydrateStateOnce();
     state.runs.unshift(run);
+    enqueuePgTask((pool) => upsertRunPg(pool, run));
+    persistStateToDisk();
     return run;
   },
 
   updateRun(ctx: TenantSpaceContext, runId: string, patch: Partial<DataRun>): DataRun | null {
+    hydrateStateOnce();
     const run = state.runs.find(
       (r) => r.id === runId && r.tenantId === ctx.tenantId && r.spaceId === ctx.spaceId
     );
     if (!run) return null;
     Object.assign(run, patch);
+    enqueuePgTask((pool) => upsertRunPg(pool, run));
+    persistStateToDisk();
     return run;
   },
 
   listRuns(ctx: TenantSpaceContext): DataRun[] {
+    hydrateStateOnce();
     return state.runs.filter(
       (r) => r.tenantId === ctx.tenantId && r.spaceId === ctx.spaceId
     );
   },
 
   replaceOpenAnomalies(ctx: TenantSpaceContext, freshAnomalies: Anomaly[]): Anomaly[] {
+    hydrateStateOnce();
     state.anomalies = state.anomalies.filter(
       (a) => !(a.tenantId === ctx.tenantId && a.spaceId === ctx.spaceId && a.status === "open")
     );
     state.anomalies.unshift(...freshAnomalies);
+    enqueuePgTask((pool) => replaceOpenAnomaliesPg(pool, ctx.tenantId, ctx.spaceId, freshAnomalies));
+    persistStateToDisk();
     return freshAnomalies;
   },
 
@@ -340,6 +533,7 @@ export const journalRepo = {
     ctx: TenantSpaceContext,
     options?: { status?: Anomaly["status"]; severity?: Anomaly["severity"]; runId?: string }
   ): Anomaly[] {
+    hydrateStateOnce();
     return state.anomalies.filter((a) => {
       if (a.tenantId !== ctx.tenantId || a.spaceId !== ctx.spaceId) return false;
       if (options?.status && a.status !== options.status) return false;
@@ -350,23 +544,30 @@ export const journalRepo = {
   },
 
   updateAnomaly(ctx: TenantSpaceContext, anomalyId: string, patch: Partial<Anomaly>): Anomaly | null {
+    hydrateStateOnce();
     const item = state.anomalies.find(
       (a) => a.id === anomalyId && a.tenantId === ctx.tenantId && a.spaceId === ctx.spaceId
     );
     if (!item) return null;
     Object.assign(item, patch);
+    enqueuePgTask((pool) => upsertAnomalyPg(pool, item));
+    persistStateToDisk();
     return item;
   },
 
   addAgentAction(ctx: TenantSpaceContext, action: AgentAction): AgentAction {
+    hydrateStateOnce();
     if (action.tenantId !== ctx.tenantId || action.spaceId !== ctx.spaceId) {
       throw new Error("Violation d'isolation : AgentAction hors contexte.");
     }
     state.agentActions.unshift(action);
+    enqueuePgTask((pool) => upsertAgentActionPg(pool, action));
+    persistStateToDisk();
     return action;
   },
 
   listAgentActions(ctx: TenantSpaceContext, runId?: string): AgentAction[] {
+    hydrateStateOnce();
     return state.agentActions.filter((a) => {
       if (a.tenantId !== ctx.tenantId || a.spaceId !== ctx.spaceId) return false;
       if (runId && a.runId !== runId) return false;
@@ -375,6 +576,7 @@ export const journalRepo = {
   },
 
   listValidations(ctx: TenantSpaceContext, status?: ValidationItem["status"]): ValidationItem[] {
+    hydrateStateOnce();
     return state.validationQueue.filter((v) => {
       if (v.tenantId !== ctx.tenantId || v.spaceId !== ctx.spaceId) return false;
       if (status && v.status !== status) return false;
@@ -383,10 +585,13 @@ export const journalRepo = {
   },
 
   addValidationItem(ctx: TenantSpaceContext, item: ValidationItem): ValidationItem {
+    hydrateStateOnce();
     if (item.tenantId !== ctx.tenantId || item.spaceId !== ctx.spaceId) {
       throw new Error("Violation d'isolation : ValidationItem hors contexte.");
     }
     state.validationQueue.unshift(item);
+    enqueuePgTask((pool) => upsertValidationItemPg(pool, item));
+    persistStateToDisk();
     return item;
   },
 };
@@ -475,6 +680,9 @@ export function executeReversibleMerge(params: {
     },
   });
 
+  journalRepo.syncRecordPg(primary);
+  journalRepo.syncRecordPg(secondary);
+  journalRepo.persistState();
   return { action, mergedRecord: secondary };
 }
 
@@ -523,6 +731,8 @@ export function executeReversibleArchive(params: {
     snapshotBefore: { recordId: rec.id, before, anomalyId },
   });
 
+  journalRepo.syncRecordPg(rec);
+  journalRepo.persistState();
   return { action, archivedRecord: rec };
 }
 
@@ -538,6 +748,7 @@ export function rollbackAgentAction(ctx: TenantSpaceContext, actionId: string): 
     const secondary = journalRepo.getNormalizedRecord(ctx, String(snap.secondaryRecordId));
     if (primary && snap.primaryBefore) {
       Object.assign(primary, snap.primaryBefore, { updatedAt: new Date().toISOString() });
+      journalRepo.syncRecordPg(primary);
     }
     if (secondary && snap.secondaryBefore) {
       const sb = snap.secondaryBefore as Record<string, unknown>;
@@ -547,6 +758,7 @@ export function rollbackAgentAction(ctx: TenantSpaceContext, actionId: string): 
       secondary.archivedReason = sb.archivedReason as string | undefined;
       secondary.updatedAt = new Date().toISOString();
       journalRepo.updateSourceStats(ctx, secondary.sourceId, {});
+      journalRepo.syncRecordPg(secondary);
     }
   } else if (action.toolName === "archive_record") {
     const rec = journalRepo.getNormalizedRecord(ctx, String(snap.recordId));
@@ -557,6 +769,7 @@ export function rollbackAgentAction(ctx: TenantSpaceContext, actionId: string): 
       rec.archivedReason = b.archivedReason as string | undefined;
       rec.updatedAt = new Date().toISOString();
       journalRepo.updateSourceStats(ctx, rec.sourceId, {});
+      journalRepo.syncRecordPg(rec);
     }
   }
 
@@ -567,6 +780,7 @@ export function rollbackAgentAction(ctx: TenantSpaceContext, actionId: string): 
   action.reverted = true;
   action.revertedAt = new Date().toISOString();
   action.revertedBy = ctx.userId;
+  journalRepo.syncActionPg(action);
 
   journalRepo.addAgentAction(ctx, {
     id: `act-rb-${Date.now()}`,
@@ -585,6 +799,7 @@ export function rollbackAgentAction(ctx: TenantSpaceContext, actionId: string): 
     reverted: false,
   });
 
+  journalRepo.persistState();
   return action;
 }
 
@@ -662,5 +877,7 @@ export function resolveValidationItem(
     });
   }
 
+  journalRepo.syncValidationPg(item);
+  journalRepo.persistState();
   return { item, executedAction };
 }

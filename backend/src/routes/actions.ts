@@ -21,6 +21,7 @@ export async function handleActionsRoute(
   url: URL
 ): Promise<void> {
   try {
+    await journalRepo.ensureReady();
     if (url.pathname.startsWith("/api/validations")) {
       if (req.method === "GET") {
         const { ctx } = resolveHttpContext(req, url);
@@ -33,11 +34,9 @@ export async function handleActionsRoute(
       if (req.method === "POST") {
         const body = ValidationDecisionSchema.parse(await readJsonBody(req));
         const { ctx } = resolveHttpContext(req, url, body.spaceId);
-        return sendJson(
-          res,
-          200,
-          resolveValidationItem(ctx, body.validationId, body.decision)
-        );
+        const resolved = resolveValidationItem(ctx, body.validationId, body.decision);
+        await journalRepo.flushPg();
+        return sendJson(res, 200, resolved);
       }
     }
 
@@ -55,6 +54,7 @@ export async function handleActionsRoute(
       const body = RollbackSchema.parse(await readJsonBody(req));
       const { ctx } = resolveHttpContext(req, url, body.spaceId);
       const revertedAction = rollbackAgentAction(ctx, body.actionId);
+      await journalRepo.flushPg();
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,

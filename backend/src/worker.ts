@@ -36,6 +36,7 @@ export function runNightlyCheckAllSpaces(): {
 }
 
 export async function processInboxFilePath(filePath: string): Promise<boolean> {
+  await journalRepo.ensureReady();
   const ext = path.extname(filePath).toLowerCase();
   if (![".csv", ".xlsx", ".txt"].includes(ext)) return false;
 
@@ -76,6 +77,7 @@ export async function processInboxFilePath(filePath: string): Promise<boolean> {
       await new CsvConnector().ingest({ source, fileBuffer: buffer, fileName: path.basename(filePath) }, ctx);
     }
     await runGuardianAgent(ctx, { sourceId: source.id, trigger: "upload" });
+    await journalRepo.flushPg();
     moveInboxFile(ctx, filePath, "archive");
     return true;
   } catch (err) {
@@ -99,7 +101,10 @@ export function startWorker() {
     cronTask = cron.schedule(
       "0 2 * * *",
       () => {
-        runNightlyCheckAllSpaces();
+        void journalRepo.ensureReady().then(() => {
+          runNightlyCheckAllSpaces();
+          return journalRepo.flushPg();
+        });
       },
       { timezone: "UTC" }
     );
