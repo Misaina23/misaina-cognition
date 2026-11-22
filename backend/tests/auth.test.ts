@@ -9,9 +9,29 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${addr.port}`;
 
   try {
-    // 1. Accès refusé sans session signée (401)
-    const noAuth = await fetch(`${baseUrl}/api/spaces`);
-    assert.equal(noAuth.status, 401);
+    // 1. Accès public refusé sans session signée (401) sur toutes les routes données, actions et rapports MEAL
+    const publicProtectedEndpoints: Array<{ method: string; path: string; body?: string }> = [
+      { method: "GET", path: "/api/spaces" },
+      { method: "GET", path: "/api/runs?spaceId=space-u1-global" },
+      { method: "POST", path: "/api/runs", body: JSON.stringify({ spaceId: "space-u1-global", mode: "agent" }) },
+      { method: "GET", path: "/api/records?spaceId=space-u1-global" },
+      { method: "GET", path: "/api/records/export?spaceId=space-u1-global" },
+      { method: "GET", path: "/api/reports/weekly?spaceId=space-u1-global" },
+      { method: "GET", path: "/api/validations?spaceId=space-u1-global" },
+      { method: "GET", path: "/api/actions?spaceId=space-u1-global" },
+      { method: "GET", path: "/api/rules?spaceId=space-u1-global" },
+      { method: "POST", path: "/api/query", body: JSON.stringify({ spaceId: "space-u1-global", question: "Combien ?" }) },
+      { method: "GET", path: "/api/knowledge/documents?spaceId=space-u1-global" },
+      { method: "POST", path: "/api/webhooks/ingest/space-u1-global", body: JSON.stringify([{ _id: "x" }]) },
+    ];
+    for (const ep of publicProtectedEndpoints) {
+      const resp = await fetch(`${baseUrl}${ep.path}`, {
+        method: ep.method,
+        headers: ep.body ? { "Content-Type": "application/json" } : undefined,
+        body: ep.body,
+      });
+      assert.equal(resp.status, 401, `${ep.method} ${ep.path} doit retourner 401 sans authentification`);
+    }
 
     // 2. En-tête X-User-Id seul refusé (401)
     const headerOnly = await fetch(`${baseUrl}/api/spaces`, {

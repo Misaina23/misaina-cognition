@@ -6,7 +6,7 @@ export interface EmailSendResult {
   recipient?: string;
 }
 
-function resolveRecipient(): string | undefined {
+function resolveRecipient(recipientOverride?: string): string | undefined {
   const devMode = String(process.env.DEV_EMAIL_MODE || "").trim().toLowerCase() === "true";
   const devRedirect = process.env.DEV_REDIRECT_TO?.trim();
   const alertTo = process.env.ALERT_EMAIL_TO?.trim();
@@ -14,7 +14,9 @@ function resolveRecipient(): string | undefined {
   const mailUser = process.env.MAIL_USERNAME?.trim() || process.env.SMTP_USER?.trim();
 
   if (devMode && devRedirect) return devRedirect;
-  return alertTo || contactTo || devRedirect || mailUser || undefined;
+  return (
+    recipientOverride?.trim() || alertTo || contactTo || devRedirect || mailUser || undefined
+  );
 }
 
 async function sendViaResend(params: {
@@ -87,9 +89,10 @@ async function sendViaSmtp(params: {
 
 export async function sendEmailSummary(
   runId: string,
-  summaryText: string
+  summaryText: string,
+  recipientOverride?: string
 ): Promise<EmailSendResult> {
-  const to = resolveRecipient();
+  const to = resolveRecipient(recipientOverride);
   if (!to) return { sent: false };
 
   const subject = `[MISAINA Gardien de données] Résumé du run ${runId}`;

@@ -7,30 +7,14 @@ const baseURL =
     : rawBaseUrl.toLowerCase().endsWith("/api")
       ? rawBaseUrl
       : `${rawBaseUrl}/api`;
-const SESSION_TOKEN_KEY = "misaina_session_jwt";
+let memorySessionToken: string | null = null;
 
 function getStoredToken(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.sessionStorage.getItem(SESSION_TOKEN_KEY) || window.localStorage.getItem(SESSION_TOKEN_KEY);
-  } catch {
-    return null;
-  }
+  return memorySessionToken;
 }
 
 function setStoredToken(token: string | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (token) {
-      window.sessionStorage.setItem(SESSION_TOKEN_KEY, token);
-      window.localStorage.setItem(SESSION_TOKEN_KEY, token);
-    } else {
-      window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
-      window.localStorage.removeItem(SESSION_TOKEN_KEY);
-    }
-  } catch {
-    // ignore storage quota / privacy mode errors
-  }
+  memorySessionToken = token;
 }
 
 export const api = axios.create({
@@ -39,6 +23,7 @@ export const api = axios.create({
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
+    "X-Requested-With": "XMLHttpRequest",
   },
 });
 
@@ -368,6 +353,9 @@ export const guardianApi = {
         runs: DataRun[];
         anomalies: Anomaly[];
         emailSummaries?: RunEmailSummary[];
+        alertSettings?: SpaceAlertSettings;
+        enumeratorScorecard?: EnumeratorScorecard[];
+        zoneBreakdown?: ZoneBreakdown[];
         automation?: AutomationStatus;
         mealIndicators?: MealIndicators;
       }>("/runs", {
@@ -423,6 +411,30 @@ export const guardianApi = {
       fileName: match?.[1] || `rapport-hebdo-${spaceId}.docx`,
     };
   },
+
+  downloadCleanCsv: async (
+    spaceId: string,
+    includeFlagged = false
+  ): Promise<{ blob: Blob; fileName: string }> => {
+    const resp = await api.get<Blob>("/records/export", {
+      params: { spaceId, includeFlagged: includeFlagged ? "true" : "false" },
+      responseType: "blob",
+    });
+    const cd = String(resp.headers["content-disposition"] || "");
+    const match = /filename="([^"]+)"/.exec(cd);
+    return {
+      blob: resp.data,
+      fileName: match?.[1] || `donnees-propres-${spaceId}.csv`,
+    };
+  },
+
+  saveSpaceAlertSettings: (
+    spaceId: string,
+    payload: { alertEmail: string; notifyOnEveryRun?: boolean }
+  ) =>
+    api
+      .put<{ settings: SpaceAlertSettings }>("/runs/settings", { spaceId, ...payload })
+      .then((r) => r.data),
 
   askQuestion: (spaceId: string, question: string) =>
     api.post<NlqResponse>("/query", { spaceId, question }).then((r) => r.data),
@@ -652,4 +664,28 @@ export interface AutomationStatus {
   pollingCron: string;
   inboxWatched: boolean;
 }
+
+export interface SpaceAlertSettings {
+  alertEmail: string;
+  notifyOnEveryRun: boolean;
+  webhookSecret: string;
+}
+
+export interface EnumeratorScorecard {
+  enumeratorId: string;
+  totalSubmissions: number;
+  cleanSubmissions: number;
+  anomaliesCount: number;
+  copyPasteAlerts: number;
+  geoAlerts: number;
+  reliabilityScore: number;
+}
+
+export interface ZoneBreakdown {
+  zone: string;
+  activeBeneficiaries: number;
+  totalAmount: number;
+  anomaliesCount: number;
+}
+
 

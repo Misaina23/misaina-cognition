@@ -79,7 +79,10 @@ export function createGuardianServer() {
       res.setHeader("Access-Control-Allow-Credentials", "true");
     }
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type,Authorization,X-Webhook-Secret,X-Requested-With"
+    );
     res.setHeader("Access-Control-Max-Age", "86400");
 
     if (req.method === "OPTIONS") {
@@ -89,6 +92,43 @@ export function createGuardianServer() {
     }
 
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+
+    // CSRF protection on cookie-authenticated mutating requests
+    const method = (req.method || "GET").toUpperCase();
+    const isMutating = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+    const usesBearer =
+      typeof req.headers.authorization === "string" &&
+      req.headers.authorization.startsWith("Bearer ");
+    const hasSessionCookie =
+      typeof req.headers.cookie === "string" && req.headers.cookie.includes("gardien_session=");
+    const isCsrfExempt =
+      url.pathname === "/api/auth/login" ||
+      url.pathname === "/api/auth/logout" ||
+      url.pathname === "/api/contact/enterprise" ||
+      url.pathname.startsWith("/api/webhooks/ingest/");
+
+    if (isMutating && hasSessionCookie && !usesBearer && !isCsrfExempt) {
+      const hasCustomHeader = Boolean(req.headers["x-requested-with"]);
+      const expectedHost = String(
+        req.headers["x-forwarded-host"] || req.headers.host || ""
+      )
+        .split(",")[0]
+        .trim()
+        .toLowerCase();
+      let originMatchesHost = false;
+      if (requestOrigin && expectedHost) {
+        try {
+          originMatchesHost = new URL(requestOrigin).host.toLowerCase() === expectedHost;
+        } catch {
+          originMatchesHost = false;
+        }
+      }
+      if (!hasCustomHeader && !originMatchesHost) {
+        return sendJson(res, 403, {
+          message: "Requête mutative refusée (vérification CSRF manquante).",
+        });
+      }
+    }
 
     if (url.pathname === "/api/health") {
       const health = await checkPgHealth();
@@ -104,7 +144,11 @@ export function createGuardianServer() {
     if (url.pathname.startsWith("/api/auth")) {
       return handleAuthRoute(req, res, url);
     }
-    if (url.pathname.startsWith("/api/sources") || url.pathname.startsWith("/api/spaces")) {
+    if (
+      url.pathname.startsWith("/api/sources") ||
+      url.pathname.startsWith("/api/spaces") ||
+      url.pathname.startsWith("/api/webhooks")
+    ) {
       return handleSourcesRoute(req, res, url);
     }
     if (

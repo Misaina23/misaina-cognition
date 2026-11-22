@@ -248,7 +248,7 @@ export default function ShowcaseLandingPage() {
                     href={sessionUser ? "/workspace" : "/login"}
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-sm hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
                   >
-                    {sessionUser ? "Ouvrir mon espace de travail" : "Connexion sécurisée"}
+                    {sessionUser ? "Ouvrir mon espace de travail" : "Se connecter pour agir"}
                     <ArrowRight size={16} />
                   </Link>
                   <a
@@ -258,6 +258,11 @@ export default function ShowcaseLandingPage() {
                     Demander un audit d&apos;architecture
                   </a>
                 </div>
+                <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Lock size={13} className="text-primary shrink-0" />
+                  Accès strictement authentifié : aucune donnée MEAL ni rapport (.csv / .docx)
+                  n&apos;est consultable ou téléchargeable publiquement.
+                </p>
               </motion.div>
 
               <motion.div
@@ -464,11 +469,15 @@ export default function ShowcaseLandingPage() {
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div className="space-y-2 max-w-2xl">
                 <p className="text-xs font-semibold uppercase tracking-widest text-primary">
-                  Démonstration Interactive du Pipeline
+                  Architecture Technique du Pipeline (Aperçu Statique)
                 </p>
                 <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-                  Inspectez le calcul RRF et la preuve cryptographique en direct
+                  Inspectez le calcul RRF et la preuve cryptographique
                 </h2>
+                <p className="text-xs text-muted-foreground">
+                  Exemples illustratifs sans aucune donnée terrain réelle : l&apos;accès aux jeux
+                  de données MEAL, exports et actions requiert une connexion.
+                </p>
               </div>
 
               {/* Segmented filter controls */}
@@ -575,7 +584,9 @@ export default function ShowcaseLandingPage() {
                   href={sessionUser ? "/workspace" : "/login"}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 py-2.5 text-xs font-semibold text-background hover:opacity-90 transition-opacity"
                 >
-                  Tester sur vos propres documents dans la console
+                  {sessionUser
+                    ? "Accéder à mes espaces et rapports"
+                    : "Se connecter pour consulter ou exporter"}
                   <ArrowRight size={14} />
                 </Link>
               </div>

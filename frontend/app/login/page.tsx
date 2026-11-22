@@ -3,25 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, KeyRound, Lock, ShieldCheck, UserCheck } from "lucide-react";
+import { ArrowLeft, KeyRound, Lock, ShieldCheck } from "lucide-react";
 import { guardianApi } from "@/lib/api";
-
-const DEMO_ACCOUNTS = [
-  {
-    label: "Direction Exécutive (Admin)",
-    email: "dir.exec@misaina-corp.org",
-    hint: "DirExec2026!",
-  },
-  {
-    label: "Opérations Sahel - Dakar",
-    email: "a.traore@misaina-corp.org",
-    hint: "SahelOps2026!",
-  },
-];
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState(DEMO_ACCOUNTS[0].email);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +18,9 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await guardianApi.login(email.trim(), password);
-      router.replace("/workspace");
+      const res = await guardianApi.login(email.trim(), password);
+      const firstSpaceId = res.spaces?.[0]?.id;
+      router.replace(firstSpaceId ? `/dashboard/${encodeURIComponent(firstSpaceId)}` : "/workspace");
     } catch {
       setError("Identifiants invalides ou session refusée par le serveur.");
     } finally {
@@ -67,7 +55,8 @@ export default function LoginPage() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Session signée par jeton JWT HS256 et cookie HttpOnly avec isolation stricte par tenant.
+            Authentification obligatoire pour consulter les données MEAL, exécuter l&apos;agent IA
+            ou exporter des rapports (.csv / .docx).
           </p>
         </div>
 
@@ -85,6 +74,8 @@ export default function LoginPage() {
             <input
               type="email"
               required
+              autoComplete="email"
+              placeholder="nom@organisation.org"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
@@ -97,6 +88,7 @@ export default function LoginPage() {
               <input
                 type="password"
                 required
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Saisir votre mot de passe"
@@ -116,29 +108,12 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="border-t border-border pt-4 space-y-2">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-            <UserCheck size={13} /> Comptes tenants de démonstration (pré-remplissage)
-          </div>
-          <div className="grid grid-cols-1 gap-2">
-            {DEMO_ACCOUNTS.map((acc) => (
-              <button
-                key={acc.email}
-                type="button"
-                onClick={() => {
-                  setEmail(acc.email);
-                  setPassword(acc.hint);
-                }}
-                className="flex items-center justify-between rounded-lg border border-border bg-background/60 px-3 py-2 text-left text-[11px] hover:bg-muted transition-colors"
-              >
-                <div>
-                  <div className="font-medium text-foreground">{acc.label}</div>
-                  <div className="font-mono text-muted-foreground">{acc.email}</div>
-                </div>
-                <span className="font-mono text-[10px] text-primary">Pré-remplir</span>
-              </button>
-            ))}
-          </div>
+        <div className="border-t border-border pt-4 flex items-start gap-2 text-[11px] text-muted-foreground leading-relaxed">
+          <Lock size={13} className="mt-0.5 shrink-0 text-primary" />
+          <span>
+            Aucune donnée bénéficiaire, soumission terrain ni rapport n&apos;est accessible sans
+            session signée (cookie HttpOnly + isolation stricte par tenant).
+          </span>
         </div>
       </div>
     </main>

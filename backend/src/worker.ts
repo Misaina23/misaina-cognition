@@ -20,13 +20,16 @@ function getInboxRoot(): string {
   return getInboxBaseDir();
 }
 
-export function runNightlyCheckAllSpaces(): {
+export function runNightlyCheckAllSpaces(
+  targetContexts?: TenantSpaceContext[]
+): {
   executedAt: string;
   spacesChecked: number;
   runs: DataRun[];
 } {
   const runs: DataRun[] = [];
-  for (const ctx of journalRepo.listAllSpaceContexts()) {
+  const contexts = targetContexts ?? journalRepo.listAllSpaceContexts();
+  for (const ctx of contexts) {
     const active = journalRepo.listNormalizedRecords(ctx, { includeArchived: false });
     if (active.length === 0) continue;
     const sourceId = journalRepo.listSources(ctx)[0]?.id ?? "nightly-check";
@@ -39,7 +42,9 @@ export function runNightlyCheckAllSpaces(): {
 /**
  * Synchronisation autonome des connecteurs API (CommCare, Kobo, ODK) configurés avec endpointUrl.
  */
-export async function pollApiSourcesAllSpaces(): Promise<{
+export async function pollApiSourcesAllSpaces(
+  targetContexts?: TenantSpaceContext[]
+): Promise<{
   polledAt: string;
   sourcesPolled: number;
   runsTriggered: number;
@@ -48,7 +53,8 @@ export async function pollApiSourcesAllSpaces(): Promise<{
   let sourcesPolled = 0;
   let runsTriggered = 0;
 
-  for (const ctx of journalRepo.listAllSpaceContexts()) {
+  const contexts = targetContexts ?? journalRepo.listAllSpaceContexts();
+  for (const ctx of contexts) {
     for (const src of journalRepo.listSources(ctx)) {
       if (src.status !== "ACTIVE") continue;
       if (src.type !== "commcare" && src.type !== "generic") continue;

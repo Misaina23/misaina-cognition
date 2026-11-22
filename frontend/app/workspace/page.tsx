@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Sun,
 } from "lucide-react";
+import { AuthGuard } from "@/components/AuthGuard";
 import {
   describeApiError,
   guardianApi,
@@ -24,6 +25,14 @@ import {
 } from "@/lib/api";
 
 export default function WorkspaceHubPage() {
+  return (
+    <AuthGuard>
+      <WorkspaceHubContent />
+    </AuthGuard>
+  );
+}
+
+function WorkspaceHubContent() {
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [spaces, setSpaces] = useState<UserSpace[]>([]);

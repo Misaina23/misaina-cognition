@@ -8,9 +8,13 @@ import { AuthUnauthorizedError } from "../auth";
 import { GenericConnector } from "../connectors/generic";
 import { runUnexpectedCasesEvaluation } from "../evaluation/unexpectedEval";
 import { ensureSpaceDirectories, journalRepo } from "../journal";
-import { listRunEmailSummaries } from "../notify/index";
+import {
+  getSpaceAlertSettings,
+  listRunEmailSummaries,
+  updateSpaceAlertSettings,
+} from "../notify/index";
 import { generateWeeklySpaceDocxBuffer } from "../reports/weeklyDocx";
-import { TenantIsolationError } from "../tenant";
+import { deriveTenantId, listAuthorizedSpaces, TenantIsolationError } from "../tenant";
 import { pollApiSourcesAllSpaces, processInboxFilePath, runNightlyCheckAllSpaces } from "../worker";
 import { readJsonBody, resolveHttpContext, sendJson } from "./sources";
 
@@ -67,11 +71,88 @@ export async function handleRunsRoute(
       }
     }
 
+    if (url.pathname === "/api/records/export" && req.method === "GET") {
+      const { ctx } = resolveHttpContext(req, url);
+      const includeFlagged = url.searchParams.get("includeFlagged") === "true";
+      const activeRecords = journalRepo.listNormalizedRecords(ctx, { includeArchived: false });
+      const openAnomalies = journalRepo.listAnomalies(ctx, { status: "open" });
+      const blockingIds = new Set(
+        openAnomalies.filter((a) => a.severity === "bloquante").map((a) => a.recordId)
+      );
+      const exported = includeFlagged
+        ? activeRecords
+        : activeRecords.filter((r) => !blockingIds.has(r.id));
+
+      const esc = (v: unknown) => {
+        const s = v === null || v === undefined ? "" : String(v);
+        return /[",\n\r;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = [
+        "externalId",
+        "fullName",
+        "phone",
+        "email",
+        "age",
+        "amount",
+        "zone",
+        "latitude",
+        "longitude",
+        "enumeratorId",
+        "status",
+        "anomaliesOpenCount",
+        "createdAt",
+      ].join(",");
+
+      const rows = exported.map((r) => {
+        const anomCount = openAnomalies.filter((a) => a.recordId === r.id).length;
+        return [
+          esc(r.externalId),
+          esc(r.fullName),
+          esc(r.phone),
+          esc(r.email),
+          esc(r.age),
+          esc(r.amount),
+          esc(r.zone),
+          esc(r.latitude),
+          esc(r.longitude),
+          esc(r.enumeratorId),
+          esc(r.status),
+          esc(anomCount),
+          esc(r.createdAt),
+        ].join(",");
+      });
+
+      const csvContent = "\uFEFF" + [header, ...rows].join("\n");
+      const fileName = `donnees-propres-${ctx.spaceId}.csv`;
+      res.writeHead(200, {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${fileName}"`,
+      });
+      res.end(csvContent);
+      return;
+    }
+
     if (url.pathname === "/api/records" && req.method === "GET") {
       const { ctx } = resolveHttpContext(req, url);
       const includeArchived = url.searchParams.get("includeArchived") === "true";
       const records = journalRepo.listNormalizedRecords(ctx, { includeArchived });
       return sendJson(res, 200, { tenantId: ctx.tenantId, spaceId: ctx.spaceId, records });
+    }
+
+    if (url.pathname === "/api/runs/settings" && req.method === "PUT") {
+      const body = z
+        .object({
+          spaceId: z.string().optional(),
+          alertEmail: z.string().email(),
+          notifyOnEveryRun: z.boolean().optional(),
+        })
+        .parse(await readJsonBody(req));
+      const { ctx } = resolveHttpContext(req, url, body.spaceId);
+      const updated = updateSpaceAlertSettings(ctx, {
+        alertEmail: body.alertEmail,
+        notifyOnEveryRun: body.notifyOnEveryRun,
+      });
+      return sendJson(res, 200, { settings: updated });
     }
 
     if (url.pathname === "/api/evaluation/unexpected" && req.method === "GET") {
@@ -115,12 +196,84 @@ export async function handleRunsRoute(
       ).size;
 
       const emailSummaries = listRunEmailSummaries(ctx);
+      const alertSettings = getSpaceAlertSettings(ctx);
+
+      const anomalyByRecord = new Map<string, typeof spaceAnomalies>();
+      for (const a of spaceAnomalies) {
+        const list = anomalyByRecord.get(a.recordId) || [];
+        list.push(a);
+        anomalyByRecord.set(a.recordId, list);
+      }
+
+      const enumMap = new Map<
+        string,
+        {
+          enumeratorId: string;
+          totalSubmissions: number;
+          cleanSubmissions: number;
+          anomaliesCount: number;
+          copyPasteAlerts: number;
+          geoAlerts: number;
+        }
+      >();
+      for (const rec of spaceRecords) {
+        const enumKey = (rec.enumeratorId || "Non assigné").trim();
+        const entry = enumMap.get(enumKey) || {
+          enumeratorId: enumKey,
+          totalSubmissions: 0,
+          cleanSubmissions: 0,
+          anomaliesCount: 0,
+          copyPasteAlerts: 0,
+          geoAlerts: 0,
+        };
+        entry.totalSubmissions += 1;
+        const recAnoms = anomalyByRecord.get(rec.id) || [];
+        if (recAnoms.length === 0 && rec.status === "active") {
+          entry.cleanSubmissions += 1;
+        }
+        entry.anomaliesCount += recAnoms.length;
+        entry.copyPasteAlerts += recAnoms.filter((a) => a.category === "enumerator_copy_paste").length;
+        entry.geoAlerts += recAnoms.filter((a) => a.category === "geo_out_of_bounds").length;
+        enumMap.set(enumKey, entry);
+      }
+
+      const enumeratorScorecard = Array.from(enumMap.values())
+        .map((e) => ({
+          ...e,
+          reliabilityScore:
+            e.totalSubmissions > 0
+              ? Math.max(0, Math.round((e.cleanSubmissions / e.totalSubmissions) * 100))
+              : 100,
+        }))
+        .sort((a, b) => a.reliabilityScore - b.reliabilityScore);
+
+      const zoneMap = new Map<
+        string,
+        { zone: string; activeBeneficiaries: number; totalAmount: number; anomaliesCount: number }
+      >();
+      for (const rec of activeRecords) {
+        const zName = (rec.zone || "Non précisée").trim();
+        const entry = zoneMap.get(zName) || {
+          zone: zName,
+          activeBeneficiaries: 0,
+          totalAmount: 0,
+          anomaliesCount: 0,
+        };
+        entry.activeBeneficiaries += 1;
+        entry.totalAmount += rec.amount || 0;
+        entry.anomaliesCount += (anomalyByRecord.get(rec.id) || []).length;
+        zoneMap.set(zName, entry);
+      }
+
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,
         runs: journalRepo.listRuns(ctx),
         anomalies: spaceAnomalies,
         emailSummaries,
+        alertSettings,
+        enumeratorScorecard,
+        zoneBreakdown: Array.from(zoneMap.values()),
         automation: {
           nightlyCron: process.env.CRON_SCHEDULE?.trim() || "0 2 * * *",
           pollingCron: process.env.MEAL_POLL_CRON || "*/15 * * * *",
@@ -142,14 +295,26 @@ export async function handleRunsRoute(
     if (req.method === "POST") {
       const body = TriggerRunSchema.parse(await readJsonBody(req));
       if (body.mode === "nightly") {
-        resolveHttpContext(req, url, body.spaceId);
-        const summary = runNightlyCheckAllSpaces();
+        const { user } = resolveHttpContext(req, url, body.spaceId);
+        const tenantId = deriveTenantId(user.department);
+        const authorizedContexts = listAuthorizedSpaces(user).map((s) => ({
+          tenantId,
+          spaceId: s.id,
+          userId: user.id,
+        }));
+        const summary = runNightlyCheckAllSpaces(authorizedContexts);
         await journalRepo.flushPg();
         return sendJson(res, 200, summary);
       }
       if (body.mode === "autonomous_sync") {
-        resolveHttpContext(req, url, body.spaceId);
-        const pollSummary = await pollApiSourcesAllSpaces();
+        const { user } = resolveHttpContext(req, url, body.spaceId);
+        const tenantId = deriveTenantId(user.department);
+        const authorizedContexts = listAuthorizedSpaces(user).map((s) => ({
+          tenantId,
+          spaceId: s.id,
+          userId: user.id,
+        }));
+        const pollSummary = await pollApiSourcesAllSpaces(authorizedContexts);
         return sendJson(res, 200, pollSummary);
       }
       const { ctx } = resolveHttpContext(req, url, body.spaceId);

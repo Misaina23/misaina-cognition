@@ -28,7 +28,14 @@ async function proxyRequest(
   const targetUrl = `${backendBase}${targetPath}${req.nextUrl.search}`;
 
   const headers = new Headers();
-  const forwardHeaders = ["authorization", "cookie", "content-type", "accept"];
+  const forwardHeaders = [
+    "authorization",
+    "cookie",
+    "content-type",
+    "accept",
+    "x-webhook-secret",
+    "x-requested-with",
+  ];
   for (const name of forwardHeaders) {
     const val = req.headers.get(name);
     if (val) headers.set(name, val);

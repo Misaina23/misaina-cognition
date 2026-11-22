@@ -7,11 +7,13 @@ import { CsvConnector } from "../connectors/csv";
 import { ExcelConnector } from "../connectors/excel";
 import { GenericConnector } from "../connectors/generic";
 import { journalRepo, saveRawUploadToArchive } from "../journal";
+import { getSpaceAlertSettings } from "../notify/index";
 import {
   createUserSpace,
   listAuthorizedSpaces,
   resolveContextForUser,
   TenantIsolationError,
+  tenantSpacesRegistry,
 } from "../tenant";
 
 const RegisterSourceSchema = z.object({
@@ -64,6 +66,52 @@ export async function handleSourcesRoute(
     if (url.pathname === "/api/spaces" && req.method === "GET") {
       const user = authenticateRequest(req);
       return sendJson(res, 200, { spaces: listAuthorizedSpaces(user) });
+    }
+
+    if (url.pathname.startsWith("/api/webhooks/ingest/") && req.method === "POST") {
+      const targetSpaceId = decodeURIComponent(
+        url.pathname.replace("/api/webhooks/ingest/", "").split("/")[0] || ""
+      );
+      const space = tenantSpacesRegistry.find((s) => s.id === targetSpaceId);
+      if (!space) {
+        return sendJson(res, 404, { message: "Espace webhook introuvable." });
+      }
+      const ctx = { tenantId: space.tenantId, spaceId: space.id, userId: space.ownerUserId };
+      const settings = getSpaceAlertSettings(ctx);
+      const providedSecret = String(req.headers["x-webhook-secret"] || "").trim();
+      if (!providedSecret || providedSecret !== settings.webhookSecret) {
+        return sendJson(res, 401, { message: "Secret webhook invalide ou manquant (X-Webhook-Secret)." });
+      }
+      const payload = await readJsonBody(req);
+      let rawItems: Record<string, unknown>[] = [];
+      if (Array.isArray(payload)) {
+        rawItems = payload as Record<string, unknown>[];
+      } else if (
+        payload &&
+        typeof payload === "object" &&
+        Array.isArray((payload as { results?: unknown }).results)
+      ) {
+        rawItems = (payload as { results: Record<string, unknown>[] }).results;
+      } else if (payload && typeof payload === "object") {
+        rawItems = [payload as Record<string, unknown>];
+      }
+      if (rawItems.length === 0) {
+        return sendJson(res, 400, { message: "Payload webhook vide." });
+      }
+
+      const src = journalRepo.ensureSourceForType(ctx, "generic", "Webhook Kobo / CommCare", {
+        format: "kobo",
+      });
+      const ingest = await new GenericConnector().ingest({ source: src, rawItems }, ctx);
+      const agentRes = await runGuardianAgent(ctx, { sourceId: src.id, trigger: "submission" });
+      await journalRepo.flushPg();
+      return sendJson(res, 200, {
+        received: rawItems.length,
+        insertedCount: ingest.insertedCount,
+        skippedIdempotentCount: ingest.skippedIdempotentCount,
+        runId: agentRes.run.id,
+        status: agentRes.run.status,
+      });
     }
 
     if (url.pathname === "/api/spaces" && req.method === "POST") {

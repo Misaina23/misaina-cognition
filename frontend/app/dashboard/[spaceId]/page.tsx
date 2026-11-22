@@ -5,10 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
-  AlertTriangle,
   Bot,
+  Check,
   CheckCircle2,
+  ChevronDown,
   Clock,
+  Copy,
   Cpu,
   Database,
   FileCode2,
@@ -17,15 +19,19 @@ import {
   FlaskConical,
   FolderInput,
   Mail,
+  MapPin,
   MessageSquare,
   MoonStar,
   Play,
   Plus,
+  Radio,
   RefreshCw,
   RotateCcw,
   Send,
   ShieldAlert,
   Upload,
+  Users,
+  XCircle,
 } from "lucide-react";
 import { SpaceHeader } from "@/components/SpaceHeader";
 import {
@@ -37,13 +43,17 @@ import {
   type AutomationStatus,
   type DataRun,
   type DataSourceConfig,
+  type EnumeratorScorecard,
   type MealIndicators,
   type NlqResponse,
   type NormalizedRecord,
   type RuleFeedbackStat,
   type RuleThresholdSuggestion,
   type RunEmailSummary,
+  type SpaceAlertSettings,
   type UnexpectedEvalReport,
+  type ValidationItem,
+  type ZoneBreakdown,
 } from "@/lib/api";
 
 type ActiveTab = "agent_pipeline" | "data_sources" | "rules";
@@ -111,6 +121,17 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function triggerBlobDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function DashboardSpacePage() {
   const router = useRouter();
   const params = useParams<{ spaceId: string }>();
@@ -125,6 +146,16 @@ export default function DashboardSpacePage() {
   const [automation, setAutomation] = useState<AutomationStatus | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [mealIndicators, setMealIndicators] = useState<MealIndicators | null>(null);
+  const [enumeratorScorecard, setEnumeratorScorecard] = useState<EnumeratorScorecard[]>([]);
+  const [zoneBreakdown, setZoneBreakdown] = useState<ZoneBreakdown[]>([]);
+  const [alertSettings, setAlertSettings] = useState<SpaceAlertSettings | null>(null);
+  const [alertEmailDraft, setAlertEmailDraft] = useState("");
+  const [notifyEveryRunDraft, setNotifyEveryRunDraft] = useState(true);
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false);
+
+  const [validations, setValidations] = useState<ValidationItem[]>([]);
+  const [decidingValidationId, setDecidingValidationId] = useState<string | null>(null);
+
   const [sources, setSources] = useState<DataSourceConfig[]>([]);
   const [records, setRecords] = useState<NormalizedRecord[]>([]);
   const [yamlDraft, setYamlDraft] = useState("");
@@ -136,7 +167,9 @@ export default function DashboardSpacePage() {
   const [loading, setLoading] = useState(true);
   const [runningMode, setRunningMode] = useState<string | null>(null);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
+  const [downloadingCsv, setDownloadingCsv] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -162,22 +195,32 @@ export default function DashboardSpacePage() {
     if (!spaceId) return;
     setLoading(true);
     try {
-      const [runsRes, actionsRes, srcRes, recRes, rulesRes, fbRes, evalRes] = await Promise.all([
-        guardianApi.getRuns(spaceId),
-        guardianApi.getActions(spaceId),
-        guardianApi.getSources(spaceId),
-        guardianApi.getRecords(spaceId, true),
-        guardianApi.getRules(spaceId),
-        guardianApi.getRuleFeedback(spaceId),
-        guardianApi.getUnexpectedEvaluation(spaceId),
-      ]);
+      const [runsRes, actionsRes, valRes, srcRes, recRes, rulesRes, fbRes, evalRes] =
+        await Promise.all([
+          guardianApi.getRuns(spaceId),
+          guardianApi.getActions(spaceId),
+          guardianApi.getValidations(spaceId),
+          guardianApi.getSources(spaceId),
+          guardianApi.getRecords(spaceId, true),
+          guardianApi.getRules(spaceId),
+          guardianApi.getRuleFeedback(spaceId),
+          guardianApi.getUnexpectedEvaluation(spaceId),
+        ]);
       setRuns(runsRes.runs || []);
       setAnomalies(runsRes.anomalies || []);
       setEmailSummaries(runsRes.emailSummaries || []);
       setSelectedEmailIdx(0);
       setAutomation(runsRes.automation || null);
       setMealIndicators(runsRes.mealIndicators || null);
+      setEnumeratorScorecard(runsRes.enumeratorScorecard || []);
+      setZoneBreakdown(runsRes.zoneBreakdown || []);
+      if (runsRes.alertSettings) {
+        setAlertSettings(runsRes.alertSettings);
+        setAlertEmailDraft(runsRes.alertSettings.alertEmail);
+        setNotifyEveryRunDraft(runsRes.alertSettings.notifyOnEveryRun);
+      }
       setActions(actionsRes.actions || []);
+      setValidations(valRes.validations || []);
       setSources(srcRes.sources || []);
       setRecords(recRes.records || []);
       setYamlDraft(rulesRes.rawYaml || "");
@@ -201,6 +244,16 @@ export default function DashboardSpacePage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  async function handleCopyText(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
+    } catch {
+      setBanner({ kind: "err", text: "Copie presse-papiers refusée par le navigateur." });
+    }
+  }
 
   async function handleRun(
     mode: "agent" | "nightly" | "autonomous_sync" | "demo_kobo_ingest" | "inbox_drop"
@@ -231,6 +284,30 @@ export default function DashboardSpacePage() {
     }
   }
 
+  async function handleDecideValidation(validationId: string, decision: "approved" | "rejected") {
+    setDecidingValidationId(validationId);
+    setBanner(null);
+    try {
+      await guardianApi.decideValidation(spaceId, validationId, decision);
+      await refresh();
+      setBanner({
+        kind: "ok",
+        text:
+          decision === "approved"
+            ? "Décision approuvée, base nettoyée et retour enregistré pour l'apprentissage des règles."
+            : "Proposition rejetée et enregistrée dans le journal d'audit.",
+      });
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+        return;
+      }
+      setBanner({ kind: "err", text: describeApiError(err) });
+    } finally {
+      setDecidingValidationId(null);
+    }
+  }
+
   async function handleRollback(actionId: string) {
     setRevertingId(actionId);
     setBanner(null);
@@ -252,19 +329,33 @@ export default function DashboardSpacePage() {
     }
   }
 
+  async function handleDownloadCleanCsv() {
+    setDownloadingCsv(true);
+    setBanner(null);
+    try {
+      const { blob, fileName } = await guardianApi.downloadCleanCsv(spaceId, false);
+      triggerBlobDownload(blob, fileName);
+      setBanner({
+        kind: "ok",
+        text: `Export CSV propre téléchargé (${fileName} — encodage UTF-8 BOM prêt pour Excel/PowerBI).`,
+      });
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+        return;
+      }
+      setBanner({ kind: "err", text: "Impossible d'exporter le fichier CSV propre." });
+    } finally {
+      setDownloadingCsv(false);
+    }
+  }
+
   async function handleDownloadWeeklyDocx() {
     setDownloadingDocx(true);
     setBanner(null);
     try {
       const { blob, fileName } = await guardianApi.downloadWeeklyDocx(spaceId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(blob, fileName);
       setBanner({ kind: "ok", text: `Rapport hebdomadaire généré (${fileName}).` });
     } catch (err) {
       if (isUnauthorizedError(err)) {
@@ -274,6 +365,28 @@ export default function DashboardSpacePage() {
       setBanner({ kind: "err", text: "Impossible de générer le rapport .docx." });
     } finally {
       setDownloadingDocx(false);
+    }
+  }
+
+  async function handleSaveAlertSettings(e: React.FormEvent) {
+    e.preventDefault();
+    if (!alertEmailDraft.trim()) return;
+    setSavingAlertSettings(true);
+    setBanner(null);
+    try {
+      const res = await guardianApi.saveSpaceAlertSettings(spaceId, {
+        alertEmail: alertEmailDraft.trim(),
+        notifyOnEveryRun: notifyEveryRunDraft,
+      });
+      setAlertSettings(res.settings);
+      setBanner({
+        kind: "ok",
+        text: `Paramètres d'alerte enregistrés (${res.settings.alertEmail}).`,
+      });
+    } catch (err) {
+      setBanner({ kind: "err", text: describeApiError(err) });
+    } finally {
+      setSavingAlertSettings(false);
     }
   }
 
@@ -395,6 +508,10 @@ export default function DashboardSpacePage() {
   const latest = runs[0];
   const totalTokens = runs.reduce((acc, r) => acc + (r.tokensUsed || 0), 0);
   const totalLlmCalls = runs.reduce((acc, r) => acc + (r.llmCallsCount || 0), 0);
+  const pendingValidations = useMemo(
+    () => validations.filter((v) => v.status === "pending"),
+    [validations]
+  );
 
   const severityCounts = useMemo(() => {
     const counts = { bloquante: 0, a_verifier: 0, mineure: 0 };
@@ -408,6 +525,11 @@ export default function DashboardSpacePage() {
   }, [anomalies, severityFilter]);
 
   const activeEmail = emailSummaries[selectedEmailIdx] || emailSummaries[0] || null;
+  const verificationTextToCopy = activeEmail?.summaryText || latest?.summaryText || "";
+  const webhookEndpointUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/webhooks/ingest/${encodedSpaceId}`
+      : `/api/webhooks/ingest/${encodedSpaceId}`;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -415,45 +537,26 @@ export default function DashboardSpacePage() {
         spaceId={spaceId}
         activeSection="overview"
         title="Agent IA Autonome — Contrôle Qualité CommCare / Kobo"
-        subtitle="Déclencheur planifié ou dépôt fichier, règles déterministes + LLM tool use, résumé par email, anomalies classées par sévérité et journal anti-dérapage."
+        subtitle="Déclenchement autonome, règles déterministes + LLM tool use, fiabilité enquêteurs, export propre CSV/Word et journal anti-dérapage."
         actions={
           <>
             <button
               type="button"
-              onClick={() => void handleRun("demo_kobo_ingest")}
+              onClick={() => void handleRun("agent")}
               disabled={runningMode !== null}
               className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 disabled:opacity-50"
             >
-              <Bot size={14} />
-              {runningMode === "demo_kobo_ingest"
-                ? "Injection & Analyse…"
-                : "Simuler export CommCare/Kobo"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleRun("inbox_drop")}
-              disabled={runningMode !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
-            >
-              <FolderInput size={13} />
-              {runningMode === "inbox_drop" ? "Dépôt…" : "Tester dépôt Inbox"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleRun("agent")}
-              disabled={runningMode !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
-            >
               <Play size={13} />
-              {runningMode === "agent" ? "Exécution…" : "Lancer Agent IA"}
+              {runningMode === "agent" ? "Contrôle en cours…" : "Lancer contrôle Agent IA"}
             </button>
             <button
               type="button"
-              onClick={() => void handleRun("nightly")}
-              disabled={runningMode !== null}
+              onClick={() => void handleDownloadCleanCsv()}
+              disabled={downloadingCsv || records.length === 0}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
-              <MoonStar size={13} /> Cron planifié
+              <FileSpreadsheet size={13} />
+              {downloadingCsv ? "Export CSV…" : "Exporter CSV propre"}
             </button>
             <button
               type="button"
@@ -489,7 +592,7 @@ export default function DashboardSpacePage() {
           </div>
         )}
 
-        {/* Architecture 5 Piliers : Version Minimale Opérationnelle */}
+        {/* Architecture 5 Piliers */}
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-primary">
@@ -500,8 +603,7 @@ export default function DashboardSpacePage() {
               {runs.length} run(s)
             </div>
             <p className="text-[11px] text-muted-foreground font-mono">
-              Cron {automation?.nightlyCron || "0 2 * * *"} · Inbox{" "}
-              {automation?.inboxWatched ? "actif" : "prêt"}
+              Cron {automation?.nightlyCron || "0 2 * * *"} · Webhook prêt
             </p>
           </div>
 
@@ -570,7 +672,7 @@ export default function DashboardSpacePage() {
                 : "border border-border bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Activity size={13} /> Résultats Agent, Email &amp; Journal
+            <Activity size={13} /> Pilotage Qualité, Email &amp; Journal
           </button>
           <button
             type="button"
@@ -581,7 +683,7 @@ export default function DashboardSpacePage() {
                 : "border border-border bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Database size={13} /> Collectes CommCare / Kobo &amp; NLQ ({records.length})
+            <Database size={13} /> Collectes, Webhooks &amp; NLQ ({records.length})
           </button>
           <button
             type="button"
@@ -592,12 +694,12 @@ export default function DashboardSpacePage() {
                 : "border border-border bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
-            <FileCode2 size={13} /> Règles Script YAML &amp; Évaluation
+            <FileCode2 size={13} /> Règles YAML &amp; Calibration
             {ruleSuggestions.length > 0 ? ` (${ruleSuggestions.length})` : ""}
           </button>
         </div>
 
-        {/* ONGLET 1 : Cœur de la Version Minimale (Anomalies, Email + Message de vérification, Journal agent_actions) */}
+        {/* ONGLET 1 : Pilotage Qualité, Validations inline, Enquêteurs, Email, Journal */}
         {tab === "agent_pipeline" && (
           <div className="space-y-6">
             {records.length === 0 && !loading && (
@@ -609,9 +711,8 @@ export default function DashboardSpacePage() {
                   <p className="text-xs text-muted-foreground max-w-2xl">
                     Injectez en un clic un export CommCare/Kobo anonymisé contenant les 4 cas
                     d&apos;erreurs (doublons + cas ambigu, âge aberrant 178 ans, GPS hors zone,
-                    copier-coller enquêteur ENQ-04) pour voir l&apos;agent exécuter ses règles, ses
-                    appels outils, rédiger le message de vérification par email et journaliser chaque
-                    action.
+                    copier-coller enquêteur ENQ-04) pour déclencher l&apos;agent IA, calculer la
+                    fiabilité des enquêteurs et préparer le CSV propre.
                   </p>
                 </div>
                 <button
@@ -622,15 +723,77 @@ export default function DashboardSpacePage() {
                 >
                   <Bot size={15} />
                   {runningMode === "demo_kobo_ingest"
-                    ? "Exécution en cours…"
+                    ? "Injection & Analyse…"
                     : "Injecter l'export CommCare/Kobo & Lancer l'Agent"}
                 </button>
               </section>
             )}
 
+            {/* Validations humaines prioritaires inline */}
+            {pendingValidations.length > 0 && (
+              <section className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-5 space-y-3 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">
+                      Cas ambigus en attente de validation humaine ({pendingValidations.length})
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Approuvez ou rejetez directement ces cas incertains sans quitter le tableau de
+                      bord.
+                    </p>
+                  </div>
+                  <Link
+                    href={`/dashboard/${encodedSpaceId}/validations`}
+                    className="text-xs font-semibold text-primary hover:underline"
+                  >
+                    File complète des validations
+                  </Link>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {pendingValidations.slice(0, 4).map((val) => (
+                    <div
+                      key={val.id}
+                      className="rounded-xl border border-border bg-card p-3.5 text-xs space-y-2.5 flex flex-col justify-between"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 font-mono text-[11px]">
+                          <span className="font-semibold text-amber-700 dark:text-amber-300 uppercase">
+                            {val.actionType}
+                          </span>
+                          <span className="text-muted-foreground tabular-nums">
+                            Confiance {(val.confidence * 100).toFixed(0)} %
+                          </span>
+                        </div>
+                        <div className="font-semibold text-foreground">{val.title}</div>
+                        <p className="text-muted-foreground leading-relaxed">{val.description}</p>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={decidingValidationId === val.id}
+                          onClick={() => void handleDecideValidation(val.id, "approved")}
+                          className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          <CheckCircle2 size={12} /> Approuver
+                        </button>
+                        <button
+                          type="button"
+                          disabled={decidingValidationId === val.id}
+                          onClick={() => void handleDecideValidation(val.id, "rejected")}
+                          className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+                        >
+                          <XCircle size={12} /> Rejeter
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Split View : Anomalies par Sévérité + Résumé Email & Message de vérification */}
             <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-              {/* Anomalies classées par sévérité */}
               <div className="lg:col-span-7 rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                   <div>
@@ -671,7 +834,7 @@ export default function DashboardSpacePage() {
                     <CheckCircle2 size={14} /> Aucune anomalie ouverte pour ce filtre.
                   </div>
                 ) : (
-                  <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                  <div className="space-y-2.5 max-h-[440px] overflow-y-auto pr-1">
                     {filteredAnomalies.map((a) => (
                       <div
                         key={a.id}
@@ -704,33 +867,37 @@ export default function DashboardSpacePage() {
                     ))}
                   </div>
                 )}
-
-                <div className="flex items-center justify-between border-t border-border pt-3 text-xs">
-                  <span className="text-muted-foreground">
-                    Les cas ambigus requièrent une confirmation avant modification définitive.
-                  </span>
-                  <Link
-                    href={`/dashboard/${encodedSpaceId}/validations`}
-                    className="font-semibold text-primary hover:underline whitespace-nowrap"
-                  >
-                    Ouvrir les validations humaines
-                  </Link>
-                </div>
               </div>
 
-              {/* Résumé envoyé par Email & Message de vérification */}
+              {/* Résumé envoyé par Email & Message de vérification copiable */}
               <div className="lg:col-span-5 rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm flex flex-col justify-between">
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between border-b border-border pb-3">
+                  <div className="flex items-center justify-between gap-2 border-b border-border pb-3">
                     <div>
                       <h2 className="text-sm font-semibold text-foreground">
                         Résumé Email &amp; Message de Vérification
                       </h2>
                       <p className="text-xs text-muted-foreground">
-                        Synthèse diffusée automatiquement après chaque exécution.
+                        Prêt à copier pour WhatsApp/SMS superviseur ou envoi SMTP/Resend.
                       </p>
                     </div>
-                    <Mail size={17} className="text-primary shrink-0" />
+                    {verificationTextToCopy && (
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyText("emailSummary", verificationTextToCopy)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted shrink-0"
+                      >
+                        {copiedKey === "emailSummary" ? (
+                          <>
+                            <Check size={12} className="text-emerald-600" /> Copié
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={12} /> Copier message
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
 
                   {activeEmail ? (
@@ -780,7 +947,8 @@ export default function DashboardSpacePage() {
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground py-4">
-                      Aucun résumé envoyé pour le moment. Lancez un contrôle ou injectez l&apos;export CommCare/Kobo.
+                      Aucun résumé envoyé pour le moment. Lancez un contrôle ou injectez l&apos;export
+                      CommCare/Kobo.
                     </p>
                   )}
                 </div>
@@ -798,6 +966,118 @@ export default function DashboardSpacePage() {
                 )}
               </div>
             </section>
+
+            {/* Gouvernance ONG & Entreprise : Scorecard Fiabilité Enquêteurs + Répartition par Zone */}
+            {(enumeratorScorecard.length > 0 || zoneBreakdown.length > 0) && (
+              <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+                <div className="lg:col-span-7 rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between gap-2 border-b border-border pb-3">
+                    <div className="flex items-center gap-2">
+                      <Users size={16} className="text-primary" />
+                      <div>
+                        <h2 className="text-sm font-semibold">
+                          Scorecard Fiabilité des Enquêteurs ({enumeratorScorecard.length})
+                        </h2>
+                        <p className="text-xs text-muted-foreground">
+                          Classés du plus critique au plus fiable (copier-coller, GPS hors zone,
+                          doublons).
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="py-2 pr-3">Enquêteur</th>
+                          <th className="py-2 pr-3">Soumissions</th>
+                          <th className="py-2 pr-3">Conformes</th>
+                          <th className="py-2 pr-3">Copier-coller</th>
+                          <th className="py-2 pr-3">GPS</th>
+                          <th className="py-2 text-right">Fiabilité</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {enumeratorScorecard.map((row) => (
+                          <tr key={row.enumeratorId}>
+                            <td className="py-2 pr-3 font-mono font-semibold text-foreground">
+                              {row.enumeratorId}
+                            </td>
+                            <td className="py-2 pr-3 font-mono tabular-nums">
+                              {row.totalSubmissions}
+                            </td>
+                            <td className="py-2 pr-3 font-mono tabular-nums">
+                              {row.cleanSubmissions}
+                            </td>
+                            <td
+                              className={`py-2 pr-3 font-mono tabular-nums ${
+                                row.copyPasteAlerts > 0
+                                  ? "font-semibold text-red-600 dark:text-red-400"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {row.copyPasteAlerts}
+                            </td>
+                            <td
+                              className={`py-2 pr-3 font-mono tabular-nums ${
+                                row.geoAlerts > 0
+                                  ? "font-semibold text-amber-600 dark:text-amber-400"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {row.geoAlerts}
+                            </td>
+                            <td
+                              className={`py-2 text-right font-mono font-bold tabular-nums ${
+                                row.reliabilityScore < 75
+                                  ? "text-red-600 dark:text-red-400"
+                                  : row.reliabilityScore < 95
+                                    ? "text-amber-600 dark:text-amber-400"
+                                    : "text-emerald-600 dark:text-emerald-400"
+                              }`}
+                            >
+                              {row.reliabilityScore} %
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
+                  <div className="flex items-center gap-2 border-b border-border pb-3">
+                    <MapPin size={16} className="text-primary" />
+                    <div>
+                      <h2 className="text-sm font-semibold">
+                        Couverture &amp; Montants par Zone ({zoneBreakdown.length})
+                      </h2>
+                      <p className="text-xs text-muted-foreground">
+                        Bénéficiaires actifs vérifiés et alertes par zone d&apos;intervention.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {zoneBreakdown.map((z) => (
+                      <div
+                        key={z.zone}
+                        className="flex items-center justify-between rounded-lg border border-border bg-background/60 px-3 py-2.5 text-xs"
+                      >
+                        <div>
+                          <div className="font-semibold text-foreground">{z.zone}</div>
+                          <div className="font-mono text-[11px] text-muted-foreground">
+                            {z.activeBeneficiaries} actif(s) · {z.anomaliesCount} alerte(s)
+                          </div>
+                        </div>
+                        <div className="text-right font-mono font-semibold tabular-nums text-foreground">
+                          {z.totalAmount.toLocaleString("fr-FR")}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
 
             {/* Pilier 5 : Journal d'actions de l'agent (Détection des dérapages) */}
             <section className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
@@ -887,9 +1167,155 @@ export default function DashboardSpacePage() {
           </div>
         )}
 
-        {/* ONGLET 2 : Collectes CommCare / Kobo / CSV & NLQ */}
+        {/* ONGLET 2 : Collectes CommCare / Kobo, Webhooks Temps Réel, Email Config & NLQ */}
         {tab === "data_sources" && (
           <div className="space-y-6">
+            {/* Centre d'Automatisation, Webhook & Notifications */}
+            <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+              <div className="lg:col-span-7 rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 border-b border-border pb-3">
+                  <Radio size={16} className="text-primary" />
+                  <div>
+                    <h2 className="text-sm font-semibold">
+                      Webhook Temps Réel KoboToolbox / CommCare &amp; Déclencheurs
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Recevez chaque nouvelle soumission terrain en temps réel ou déclenchez un test
+                      de pipeline.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 rounded-xl border border-border bg-background/60 p-3.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      Endpoint POST (REST Services Kobo / CommCare Forwarding)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyText("webhookUrl", webhookEndpointUrl)}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                    >
+                      {copiedKey === "webhookUrl" ? (
+                        <>
+                          <Check size={11} /> URL copiée
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={11} /> Copier URL
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="truncate rounded border border-border bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-foreground">
+                    {webhookEndpointUrl}
+                  </div>
+                  {alertSettings?.webhookSecret && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        Header requis : <strong className="text-foreground">X-Webhook-Secret</strong>{" "}
+                        = {alertSettings.webhookSecret}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleCopyText("webhookSecret", alertSettings.webhookSecret)
+                        }
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                      >
+                        {copiedKey === "webhookSecret" ? "Secret copié" : "Copier secret"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleRun("demo_kobo_ingest")}
+                    disabled={runningMode !== null}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    <Bot size={13} />
+                    {runningMode === "demo_kobo_ingest"
+                      ? "Injection…"
+                      : "Simuler export CommCare/Kobo"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRun("inbox_drop")}
+                    disabled={runningMode !== null}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    <FolderInput size={13} />
+                    {runningMode === "inbox_drop" ? "Dépôt…" : "Tester dépôt Inbox"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRun("nightly")}
+                    disabled={runningMode !== null}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    <MoonStar size={13} /> Exécuter Cron planifié
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRun("autonomous_sync")}
+                    disabled={runningMode !== null}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    <RefreshCw size={13} /> Synchro API
+                  </button>
+                </div>
+              </div>
+
+              <form
+                onSubmit={handleSaveAlertSettings}
+                className="lg:col-span-5 rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 border-b border-border pb-3">
+                    <Mail size={16} className="text-primary" />
+                    <div>
+                      <h2 className="text-sm font-semibold">Destinataire des Alertes Email</h2>
+                      <p className="text-xs text-muted-foreground">
+                        Email recevant la synthèse et les cas à vérifier après chaque contrôle.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">
+                      Adresse email coordinateur / équipe MEAL
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={alertEmailDraft}
+                      onChange={(e) => setAlertEmailDraft(e.target.value)}
+                      placeholder="coordinateur-meal@organisation.org"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={notifyEveryRunDraft}
+                      onChange={(e) => setNotifyEveryRunDraft(e.target.checked)}
+                      className="rounded border-border"
+                    />
+                    Envoyer un résumé après chaque exécution autonome
+                  </label>
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingAlertSettings}
+                  className="w-full rounded-lg bg-foreground px-3.5 py-2 text-xs font-medium text-background hover:opacity-90 disabled:opacity-50"
+                >
+                  {savingAlertSettings ? "Enregistrement…" : "Enregistrer la configuration email"}
+                </button>
+              </form>
+            </section>
+
             {mealIndicators && (
               <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -904,7 +1330,7 @@ export default function DashboardSpacePage() {
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
                   <div className="rounded-lg border border-border bg-background/60 p-3">
                     <div className="text-muted-foreground">Zones couvertes</div>
-                    <div className="text-lg font-bold font-mono">
+                    <div className="text-lg font-bold font-mono tabular-nums">
                       {mealIndicators.zonesCoveredCount}
                     </div>
                     <div className="truncate font-mono text-[10px] text-muted-foreground">
@@ -913,7 +1339,7 @@ export default function DashboardSpacePage() {
                   </div>
                   <div className="rounded-lg border border-border bg-background/60 p-3">
                     <div className="text-muted-foreground">Enquêteurs identifiés</div>
-                    <div className="text-lg font-bold font-mono">
+                    <div className="text-lg font-bold font-mono tabular-nums">
                       {mealIndicators.enumeratorsCount}
                     </div>
                     <div className="text-[10px] text-muted-foreground">Agents terrain actifs</div>
@@ -921,7 +1347,7 @@ export default function DashboardSpacePage() {
                   <div className="rounded-lg border border-border bg-background/60 p-3">
                     <div className="text-muted-foreground">Alertes copier-coller</div>
                     <div
-                      className={`text-lg font-bold font-mono ${
+                      className={`text-lg font-bold font-mono tabular-nums ${
                         mealIndicators.copyPasteAlerts > 0
                           ? "text-red-600 dark:text-red-400"
                           : "text-emerald-600 dark:text-emerald-400"
@@ -935,7 +1361,7 @@ export default function DashboardSpacePage() {
                   </div>
                   <div className="rounded-lg border border-border bg-background/60 p-3">
                     <div className="text-muted-foreground">Montants suivis</div>
-                    <div className="text-lg font-bold font-mono">
+                    <div className="text-lg font-bold font-mono tabular-nums">
                       {mealIndicators.totalAmountDisbursed.toLocaleString("fr-FR")}
                     </div>
                     <div className="text-[10px] text-muted-foreground">Cumul actif vérifié</div>
@@ -1165,9 +1591,19 @@ export default function DashboardSpacePage() {
 
             {/* Enregistrements normalisés */}
             <section className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
-              <h2 className="text-sm font-semibold">
-                Enregistrements normalisés ({records.length} — aucune suppression physique)
-              </h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold">
+                  Enregistrements normalisés ({records.length} — aucune suppression physique)
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadCleanCsv()}
+                  disabled={downloadingCsv || records.length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                >
+                  <FileSpreadsheet size={12} /> Télécharger base nettoyée (.csv)
+                </button>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
@@ -1209,92 +1645,34 @@ export default function DashboardSpacePage() {
           </div>
         )}
 
-        {/* ONGLET 3 : Règles YAML, Apprentissage & Évaluation Hors-Règles */}
+        {/* ONGLET 3 : Règles YAML, Calibration & Benchmark R&D repliable */}
         {tab === "rules" && (
           <div className="space-y-6">
-            {unexpectedEval && (
-              <section className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <FlaskConical size={16} className="text-primary" />
-                  <div>
-                    <h2 className="text-sm font-semibold">
-                      Évaluation sur cas imprévus ({unexpectedEval.totalUnexpectedErrors} erreurs
-                      hors YAML sur {unexpectedEval.totalRows} lignes)
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                      Comparaison entre les règles YAML statiques et le détecteur d&apos;anomalies
-                      imprévues.
-                    </p>
-                  </div>
+            <section className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold">Configuration YAML des règles du projet</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Champs obligatoires, plages, déduplication et zones d&apos;intervention GPS
+                    (`geoBounds.interventionZones`).
+                  </p>
                 </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
-                  <div className="rounded-lg border border-border bg-background/60 p-3">
-                    <div className="text-muted-foreground">Précision (Détecteur imprévus)</div>
-                    <div className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
-                      {(unexpectedEval.agentDetector.precision * 100).toFixed(0)} %
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/60 p-3">
-                    <div className="text-muted-foreground">Rappel (Détecteur imprévus)</div>
-                    <div className="text-xl font-bold font-mono text-primary">
-                      {(unexpectedEval.agentDetector.recall * 100).toFixed(0)} % (
-                      {unexpectedEval.agentDetector.truePositives}/
-                      {unexpectedEval.totalUnexpectedErrors})
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/60 p-3">
-                    <div className="text-muted-foreground">Faux positifs</div>
-                    <div className="text-xl font-bold font-mono">
-                      {unexpectedEval.agentDetector.falsePositives}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/60 p-3">
-                    <div className="text-muted-foreground">Rappel YAML seul (baseline)</div>
-                    <div className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">
-                      {(unexpectedEval.yamlBaseline.recall * 100).toFixed(0)} % (
-                      {unexpectedEval.yamlBaseline.truePositives}/
-                      {unexpectedEval.totalUnexpectedErrors})
-                    </div>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
-                      <tr>
-                        <th className="py-2 pr-3">ID cas</th>
-                        <th className="py-2 pr-3">Type imprévu</th>
-                        <th className="py-2 pr-3">Couvert YAML</th>
-                        <th className="py-2 pr-3">Détecté Agent</th>
-                        <th className="py-2">Motif observé</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {unexpectedEval.cases.map((c) => (
-                        <tr key={c.externalId}>
-                          <td className="py-2 pr-3 font-mono text-[11px]">{c.externalId}</td>
-                          <td className="py-2 pr-3 font-mono text-[11px]">{c.errorType}</td>
-                          <td className="py-2 pr-3 font-mono text-[11px]">
-                            {c.caughtByYaml ? "Oui" : "Non"}
-                          </td>
-                          <td className="py-2 pr-3 font-mono text-[11px] font-semibold">
-                            {c.caughtByAgent ? (
-                              <span className="text-emerald-600 dark:text-emerald-400">Détecté</span>
-                            ) : (
-                              <span className="text-red-600 dark:text-red-400">Manqué</span>
-                            )}
-                          </td>
-                          <td className="py-2 text-muted-foreground">
-                            {c.detectedReasons.join(" ; ") || c.description}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
+                <button
+                  type="button"
+                  onClick={() => void handleSaveRules()}
+                  disabled={savingRules}
+                  className="rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {savingRules ? "Enregistrement…" : "Valider et enregistrer"}
+                </button>
+              </div>
+              <textarea
+                rows={18}
+                value={yamlDraft}
+                onChange={(e) => setYamlDraft(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background p-3 font-mono text-xs leading-relaxed"
+              />
+            </section>
 
             <section className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
               <div>
@@ -1365,31 +1743,101 @@ export default function DashboardSpacePage() {
               )}
             </section>
 
-            <section className="rounded-xl border border-border bg-card p-5 space-y-3 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-sm font-semibold">Configuration YAML des règles du projet</h2>
-                  <p className="text-xs text-muted-foreground">
-                    Champs obligatoires, plages, déduplication et zones d&apos;intervention GPS
-                    (`geoBounds.interventionZones`).
-                  </p>
+            {/* Benchmark R&D repliable pour ne pas encombrer le pilotage quotidien */}
+            {unexpectedEval && (
+              <details className="group rounded-xl border border-border bg-card p-5 shadow-sm">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <FlaskConical size={16} className="text-primary" />
+                    <div>
+                      <h2 className="text-sm font-semibold">
+                        Benchmark R&amp;D : Évaluation sur {unexpectedEval.totalUnexpectedErrors} cas
+                        imprévus hors YAML
+                      </h2>
+                      <p className="text-xs text-muted-foreground">
+                        Précision {(unexpectedEval.agentDetector.precision * 100).toFixed(0)} % ·
+                        Rappel {(unexpectedEval.agentDetector.recall * 100).toFixed(0)} % vs baseline
+                        YAML {(unexpectedEval.yamlBaseline.recall * 100).toFixed(0)} %
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronDown
+                    size={16}
+                    className="text-muted-foreground transition-transform group-open:rotate-180"
+                  />
+                </summary>
+
+                <div className="mt-4 space-y-4 border-t border-border pt-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                    <div className="rounded-lg border border-border bg-background/60 p-3">
+                      <div className="text-muted-foreground">Précision (Détecteur imprévus)</div>
+                      <div className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        {(unexpectedEval.agentDetector.precision * 100).toFixed(0)} %
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/60 p-3">
+                      <div className="text-muted-foreground">Rappel (Détecteur imprévus)</div>
+                      <div className="text-xl font-bold font-mono text-primary tabular-nums">
+                        {(unexpectedEval.agentDetector.recall * 100).toFixed(0)} % (
+                        {unexpectedEval.agentDetector.truePositives}/
+                        {unexpectedEval.totalUnexpectedErrors})
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/60 p-3">
+                      <div className="text-muted-foreground">Faux positifs</div>
+                      <div className="text-xl font-bold font-mono tabular-nums">
+                        {unexpectedEval.agentDetector.falsePositives}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/60 p-3">
+                      <div className="text-muted-foreground">Rappel YAML seul (baseline)</div>
+                      <div className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400 tabular-nums">
+                        {(unexpectedEval.yamlBaseline.recall * 100).toFixed(0)} % (
+                        {unexpectedEval.yamlBaseline.truePositives}/
+                        {unexpectedEval.totalUnexpectedErrors})
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border text-[11px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="py-2 pr-3">ID cas</th>
+                          <th className="py-2 pr-3">Type imprévu</th>
+                          <th className="py-2 pr-3">Couvert YAML</th>
+                          <th className="py-2 pr-3">Détecté Agent</th>
+                          <th className="py-2">Motif observé</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {unexpectedEval.cases.map((c) => (
+                          <tr key={c.externalId}>
+                            <td className="py-2 pr-3 font-mono text-[11px]">{c.externalId}</td>
+                            <td className="py-2 pr-3 font-mono text-[11px]">{c.errorType}</td>
+                            <td className="py-2 pr-3 font-mono text-[11px]">
+                              {c.caughtByYaml ? "Oui" : "Non"}
+                            </td>
+                            <td className="py-2 pr-3 font-mono text-[11px] font-semibold">
+                              {c.caughtByAgent ? (
+                                <span className="text-emerald-600 dark:text-emerald-400">
+                                  Détecté
+                                </span>
+                              ) : (
+                                <span className="text-red-600 dark:text-red-400">Manqué</span>
+                              )}
+                            </td>
+                            <td className="py-2 text-muted-foreground">
+                              {c.detectedReasons.join(" ; ") || c.description}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveRules()}
-                  disabled={savingRules}
-                  className="rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                >
-                  {savingRules ? "Enregistrement…" : "Valider et enregistrer"}
-                </button>
-              </div>
-              <textarea
-                rows={20}
-                value={yamlDraft}
-                onChange={(e) => setYamlDraft(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background p-3 font-mono text-xs leading-relaxed"
-              />
-            </section>
+              </details>
+            )}
           </div>
         )}
       </main>

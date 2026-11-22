@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { TenantSpaceContext } from "../connectors/types";
 import { journalRepo } from "../journal";
 import { sendEmailSummary } from "./email";
@@ -23,7 +24,64 @@ export interface RunEmailSummary {
   sentAt: string;
 }
 
+export interface SpaceAlertSettings {
+  alertEmail: string;
+  notifyOnEveryRun: boolean;
+  webhookSecret: string;
+}
+
 const emailOutbox: RunEmailSummary[] = [];
+const spaceAlertSettings = new Map<
+  string,
+  { customAlertEmail?: string; notifyOnEveryRun: boolean; webhookSecret: string }
+>();
+
+function spaceKey(ctx: Pick<TenantSpaceContext, "tenantId" | "spaceId">): string {
+  return `${ctx.tenantId}::${ctx.spaceId}`;
+}
+
+function getOrCreateRecord(ctx: Pick<TenantSpaceContext, "tenantId" | "spaceId">) {
+  const key = spaceKey(ctx);
+  let rec = spaceAlertSettings.get(key);
+  if (!rec) {
+    rec = {
+      notifyOnEveryRun: true,
+      webhookSecret: crypto
+        .createHmac("sha256", "misaina-webhook-seed")
+        .update(key)
+        .digest("hex")
+        .slice(0, 24),
+    };
+    spaceAlertSettings.set(key, rec);
+  }
+  return rec;
+}
+
+export function getSpaceAlertSettings(
+  ctx: Pick<TenantSpaceContext, "tenantId" | "spaceId">
+): SpaceAlertSettings {
+  const rec = getOrCreateRecord(ctx);
+  return {
+    alertEmail:
+      rec.customAlertEmail || process.env.ALERT_EMAIL_TO?.trim() || "equipe-meal@misaina-corp.org",
+    notifyOnEveryRun: rec.notifyOnEveryRun,
+    webhookSecret: rec.webhookSecret,
+  };
+}
+
+export function updateSpaceAlertSettings(
+  ctx: Pick<TenantSpaceContext, "tenantId" | "spaceId">,
+  patch: Partial<Pick<SpaceAlertSettings, "alertEmail" | "notifyOnEveryRun">>
+): SpaceAlertSettings {
+  const rec = getOrCreateRecord(ctx);
+  if (typeof patch.alertEmail === "string" && patch.alertEmail.trim()) {
+    rec.customAlertEmail = patch.alertEmail.trim();
+  }
+  if (typeof patch.notifyOnEveryRun === "boolean") {
+    rec.notifyOnEveryRun = patch.notifyOnEveryRun;
+  }
+  return getSpaceAlertSettings(ctx);
+}
 
 export function listRunEmailSummaries(ctx: TenantSpaceContext): RunEmailSummary[] {
   return emailOutbox.filter(
@@ -40,21 +98,25 @@ export async function dispatchRunSummaryNotification(
   runId: string,
   summaryText: string
 ): Promise<NotificationResult> {
+  const rec = getOrCreateRecord(ctx);
+  const settings = getSpaceAlertSettings(ctx);
   const channels = ["ui_preview", "agent_actions"];
   let emailSent = false;
   let emailProvider: "resend" | "smtp" | undefined;
   let recipient: string | undefined;
 
-  try {
-    const emailRes = await sendEmailSummary(runId, summaryText);
-    if (emailRes.sent) {
-      emailSent = true;
-      emailProvider = emailRes.provider;
-      recipient = emailRes.recipient;
-      channels.push("email");
+  if (settings.notifyOnEveryRun) {
+    try {
+      const emailRes = await sendEmailSummary(runId, summaryText, rec.customAlertEmail);
+      if (emailRes.sent) {
+        emailSent = true;
+        emailProvider = emailRes.provider;
+        recipient = emailRes.recipient;
+        channels.push("email");
+      }
+    } catch (err) {
+      console.warn("Notification Email échouée:", err);
     }
-  } catch (err) {
-    console.warn("Notification Email échouée:", err);
   }
 
   emailOutbox.unshift({
@@ -63,7 +125,7 @@ export async function dispatchRunSummaryNotification(
     spaceId: ctx.spaceId,
     runId,
     subject: `[MISAINA Gardien de données] Résumé du run ${runId}`,
-    recipient: recipient || process.env.ALERT_EMAIL_TO?.trim() || "equipe-meal@misaina-corp.org",
+    recipient: recipient || settings.alertEmail,
     channels: [...channels],
     emailSent,
     emailProvider,
