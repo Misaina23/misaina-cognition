@@ -273,6 +273,8 @@ CREATE TABLE IF NOT EXISTS agent_actions (
   author_id TEXT,
   llm_provider TEXT,
   llm_model TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
   tokens_used INTEGER,
   duration_ms INTEGER,
   reversible BOOLEAN NOT NULL DEFAULT FALSE,
@@ -283,6 +285,8 @@ CREATE TABLE IF NOT EXISTS agent_actions (
 );
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS llm_provider TEXT;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS llm_model TEXT;
+ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
+ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
 ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS duration_ms INTEGER;
 `;
@@ -497,6 +501,18 @@ export async function initAndHydrateFromPg(seedDefaults: {
       authorId: r.author_id ?? undefined,
       llmProvider: r.llm_provider ?? undefined,
       llmModel: r.llm_model ?? undefined,
+      inputTokens:
+        r.input_tokens === null || r.input_tokens === undefined
+          ? typeof r.output?.inputTokens === "number"
+            ? r.output.inputTokens
+            : undefined
+          : Number(r.input_tokens),
+      outputTokens:
+        r.output_tokens === null || r.output_tokens === undefined
+          ? typeof r.output?.outputTokens === "number"
+            ? r.output.outputTokens
+            : undefined
+          : Number(r.output_tokens),
       tokensUsed:
         r.tokens_used === null || r.tokens_used === undefined ? undefined : Number(r.tokens_used),
       durationMs:
@@ -663,15 +679,17 @@ export async function upsertAgentActionPg(pool: Pool, act: AgentAction): Promise
   await pool.query(
     `INSERT INTO agent_actions (
        id, tenant_id, space_id, run_id, timestamp, tool_name, inputs, output,
-       decision, confidence, author, author_id, llm_provider, llm_model, tokens_used, duration_ms,
+       decision, confidence, author, author_id, llm_provider, llm_model,
+       input_tokens, output_tokens, tokens_used, duration_ms,
        reversible, reverted, reverted_at, reverted_by, snapshot_before
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb)
      ON CONFLICT (id) DO UPDATE SET reverted = EXCLUDED.reverted, reverted_at = EXCLUDED.reverted_at, reverted_by = EXCLUDED.reverted_by`,
     [
       act.id, act.tenantId, act.spaceId, act.runId, act.timestamp, act.toolName,
       JSON.stringify(act.inputs ?? {}), JSON.stringify(act.output ?? {}), act.decision,
       act.confidence, act.author, act.authorId ?? null,
-      act.llmProvider ?? null, act.llmModel ?? null, act.tokensUsed ?? null, act.durationMs ?? null,
+      act.llmProvider ?? null, act.llmModel ?? null,
+      act.inputTokens ?? null, act.outputTokens ?? null, act.tokensUsed ?? null, act.durationMs ?? null,
       act.reversible, act.reverted,
       act.revertedAt ?? null, act.revertedBy ?? null,
       act.snapshotBefore ? JSON.stringify(act.snapshotBefore) : null,

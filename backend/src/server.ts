@@ -1,4 +1,5 @@
 import http from "node:http";
+import { createLlmProvider } from "./llm/provider";
 import { checkPgHealth, closePgPool } from "./pgStore";
 import { handleActionsRoute } from "./routes/actions";
 import { handleAuthRoute } from "./routes/auth";
@@ -28,10 +29,13 @@ export function createGuardianServer() {
 
     if (url.pathname === "/api/health") {
       const health = await checkPgHealth();
+      const activeLlm = createLlmProvider();
       return sendJson(res, health.ok ? 200 : 503, {
         status: health.ok ? "ok" : "error",
         service: "misaina-meal-backend",
         storage: health.storage,
+        llmProvider: activeLlm.providerName,
+        llmModel: activeLlm.modelName,
       });
     }
     if (url.pathname.startsWith("/api/auth")) {

@@ -125,11 +125,14 @@ export interface AgentAction {
   runId: string;
   timestamp: string;
   toolName: string;
+  output?: Record<string, unknown>;
   decision: string;
   confidence: number;
   author: "agent" | "human";
   llmProvider?: string;
   llmModel?: string;
+  inputTokens?: number;
+  outputTokens?: number;
   tokensUsed?: number;
   durationMs?: number;
   reversible: boolean;

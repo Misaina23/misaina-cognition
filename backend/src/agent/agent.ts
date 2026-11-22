@@ -263,6 +263,8 @@ function recordLlmCallAction(params: {
     author: "agent",
     llmProvider: provider.providerName,
     llmModel: provider.modelName,
+    inputTokens: response.usage.inputTokens,
+    outputTokens: response.usage.outputTokens,
     tokensUsed: response.usage.totalTokens,
     durationMs: effectiveDurationMs,
     reversible: false,
@@ -380,8 +382,14 @@ async function runLlmToolLoop(params: {
     durationMs: verdictDurationMs,
   });
 
+  const cleanedJsonText = (finalResp.text || "{}")
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
   return {
-    verdict: AgentVerdictSchema.parse(JSON.parse((finalResp.text || "{}").trim())),
+    verdict: AgentVerdictSchema.parse(JSON.parse(cleanedJsonText || "{}")),
     tokensUsed: totalTokens,
     costUsd: Number(totalCostUsd.toFixed(6)),
     llmCallsCount,

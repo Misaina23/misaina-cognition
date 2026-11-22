@@ -1,6 +1,11 @@
 import type { TenantSpaceContext } from "../connectors/types";
 import { journalRepo } from "../journal";
-import { createLlmProvider, type LlmMessage, type LlmToolDeclaration } from "../llm/provider";
+import {
+  createLlmProvider,
+  type LlmMessage,
+  type LlmProvider,
+  type LlmToolDeclaration,
+} from "../llm/provider";
 import { normalizeText } from "../rules/dedupe";
 
 export interface NlqQueryParams {
@@ -367,7 +372,8 @@ function formatDeterministicAnswer(
  */
 export async function askNaturalLanguageSpaceQuestion(
   ctx: TenantSpaceContext,
-  question: string
+  question: string,
+  options?: { llmProvider?: LlmProvider }
 ): Promise<NlqAnswer> {
   const cleanQ = question.trim();
   const lang = detectQuestionLanguage(cleanQ);
@@ -394,7 +400,7 @@ export async function askNaturalLanguageSpaceQuestion(
     };
   }
 
-  const provider = createLlmProvider();
+  const provider = options?.llmProvider ?? createLlmProvider();
   const fallbackParams = inferDeterministicQueryParams(ctx, cleanQ);
 
   if (provider.providerName !== "deterministic") {
@@ -432,6 +438,7 @@ Utilise obligatoirement l'outil query_space_data pour lire les chiffres réels p
             inputTokens: res.usage.inputTokens,
             outputTokens: res.usage.outputTokens,
             totalTokens: res.usage.totalTokens,
+            costUsd: res.usage.costUsd,
             durationMs: callDurationMs,
             toolCallsCount: res.toolCalls.length,
           },
@@ -440,6 +447,8 @@ Utilise obligatoirement l'outil query_space_data pour lire les chiffres réels p
           author: "agent",
           llmProvider: provider.providerName,
           llmModel: provider.modelName,
+          inputTokens: res.usage.inputTokens,
+          outputTokens: res.usage.outputTokens,
           tokensUsed: res.usage.totalTokens,
           durationMs: callDurationMs,
           reversible: false,

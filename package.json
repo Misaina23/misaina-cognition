@@ -1,27 +1,43 @@
 {
-  "name": "misaina-cognition-frontend",
+  "name": "misaina-cognition-guardian",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000 -H 0.0.0.0",
-    "build": "rm -rf .next && next build",
-    "start": "next start -p 3000 -H 0.0.0.0",
-    "lint": "next lint"
+    "dev": "bash -c 'trap \"kill 0\" EXIT; BACKEND_PORT=4000 tsx backend/src/server.ts & ./node_modules/.bin/next dev -p 3000 -H 0.0.0.0 frontend'",
+    "build": "tsc -p backend/tsconfig.json && rm -rf frontend/.next && ./node_modules/.bin/next build frontend",
+    "start": "bash -c 'trap \"kill 0\" EXIT; BACKEND_PORT=4000 node backend/dist/src/server.js & ./node_modules/.bin/next start -p 3000 -H 0.0.0.0 frontend'",
+    "lint": "bash -c 'cd frontend && ../node_modules/.bin/next lint'",
+    "test": "npm --prefix backend test"
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
     "@tanstack/react-query": "^5.62.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^8.0.2",
+    "@types/papaparse": "^5.5.2",
+    "@types/pg": "^8.23.1",
     "axios": "^1.7.9",
+    "chokidar": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "docx": "^9.16.0",
+    "exceljs": "^4.4.0",
+    "js-yaml": "^5.5.0",
+    "jschardet": "^4.1.0",
     "lucide-react": "^0.469.0",
     "motion": "^14.8.0",
-    "next": "15.1.0",
+    "next": "15.5.29",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^10.6.1",
+    "papaparse": "^5.7.1",
+    "pg": "^8.23.1",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-markdown": "^9.0.1",
     "recharts": "^2.13.3",
     "tailwind-merge": "^2.5.5",
+    "zod": "^4.6.7",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -33,6 +49,6 @@
     "postcss": "^8.4.49",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.17.0",
-    "eslint-config-next": "15.1.0"
+    "eslint-config-next": "15.5.29"
   }
 }

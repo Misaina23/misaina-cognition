@@ -85,6 +85,7 @@ export async function handleRunsRoute(
       const body = NlqBodySchema.parse(await readJsonBody(req));
       const { ctx } = resolveHttpContext(req, url, body.spaceId);
       const result = await askNaturalLanguageSpaceQuestion(ctx, body.question);
+      await journalRepo.flushPg();
       return sendJson(res, 200, result);
     }
 

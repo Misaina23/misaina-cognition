@@ -203,6 +203,8 @@ export interface AgentAction {
   authorId?: string;
   llmProvider?: string;
   llmModel?: string;
+  inputTokens?: number;
+  outputTokens?: number;
   tokensUsed?: number;
   durationMs?: number;
   reversible: boolean;

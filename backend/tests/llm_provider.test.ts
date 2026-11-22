@@ -31,11 +31,12 @@ async function main() {
     assert.equal(fallbackProvider.modelName, "rules-fallback-v1");
 
     // 1b. Sélection de GeminiProvider via LLM_PROVIDER=gemini avec GEMINI_API_KEY
-    process.env.LLM_PROVIDER = "gemini";
+    process.env.LLM_PROVIDER = " Gemini ";
     process.env.GEMINI_API_KEY = "test-gemini-key-placeholder";
     const geminiProvider: LLMProvider = createLlmProvider();
     assert.ok(geminiProvider instanceof GeminiProvider);
     assert.equal(geminiProvider.providerName, "gemini");
+    assert.equal(geminiProvider.modelName, "gemini-4-hydrogen");
     delete process.env.GEMINI_API_KEY;
 
     // 2. Sélection par LLM_PROVIDER=mock + vérification chat({ system, messages, tools, schema })
@@ -156,6 +157,8 @@ async function main() {
     for (const act of llmActions) {
       assert.equal(act.llmProvider, "mock");
       assert.equal(act.llmModel, "mock-llm-v1");
+      assert.ok(typeof act.inputTokens === "number" && act.inputTokens > 0);
+      assert.ok(typeof act.outputTokens === "number" && act.outputTokens > 0);
       assert.ok(typeof act.tokensUsed === "number" && act.tokensUsed > 0);
       assert.ok(typeof act.durationMs === "number" && act.durationMs >= 0);
     }
@@ -184,9 +187,28 @@ async function main() {
       .filter((a) => a.toolName === "llm_chat");
     assert.equal(nlqActions.length, 2);
     assert.equal(nlqActions[0].llmProvider, "mock");
+    assert.ok((nlqActions[0].inputTokens || 0) > 0);
+    assert.ok((nlqActions[0].outputTokens || 0) > 0);
     assert.ok((nlqActions[0].tokensUsed || 0) > 0);
 
-    // 4. Vérifier que MockProvider direct fonctionne avec chat({ system, messages, tools, schema })
+    // 4. Vérifier que MockProvider sans handler fonctionne aussi de bout en bout (agent + NLQ)
+    setMockLlmHandler(null);
+    process.env.LLM_PROVIDER = " MOCK ";
+    const defaultMockAgentRes = await runGuardianAgent(ctx, { sourceId: src.id, trigger: "manual" });
+    assert.equal(defaultMockAgentRes.usedGemini, true);
+    assert.equal(defaultMockAgentRes.llmProvider, "mock");
+    assert.ok(defaultMockAgentRes.run.tokensUsed > 0);
+    const defaultMockActions = journalRepo
+      .listAgentActions(ctx, defaultMockAgentRes.run.id)
+      .filter((a) => a.toolName === "llm_chat");
+    assert.ok(defaultMockActions.length >= 2);
+    assert.equal(defaultMockActions[0].llmProvider, "mock");
+
+    const defaultNlqRes = await askNaturalLanguageSpaceQuestion(ctx, "Résumé de l'espace");
+    assert.equal(defaultNlqRes.llmProvider, "mock");
+    assert.ok(defaultNlqRes.tokensUsed > 0);
+
+    // 5. Vérifier que MockProvider direct fonctionne avec chat({ system, messages, tools, schema })
     const directMock = new MockProvider(() => ({
       text: "{\"ok\":true}",
       toolCalls: [],
@@ -201,7 +223,7 @@ async function main() {
     assert.equal(chatOut.usage.durationMs, 2);
 
     console.log(
-      `[backend/tests/llm_provider.test.ts] Abstraction LlmProvider.chat validée : ${llmActions.length} appels LLM journalisés dans agent_actions, repli déterministe sans clé OK.`
+      `[backend/tests/llm_provider.test.ts] Abstraction LLMProvider.chat validée : ${llmActions.length} appels LLM journalisés dans agent_actions, MockProvider autonome & repli déterministe sans clé OK.`
     );
   } finally {
     setMockLlmHandler(null);
