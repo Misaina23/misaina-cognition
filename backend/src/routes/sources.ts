@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { runGuardianAgent } from "../agent/agent";
+import { authenticateRequest, AuthUnauthorizedError } from "../auth";
 import { CommCareConnector } from "../connectors/commcare";
 import { CsvConnector } from "../connectors/csv";
 import { ExcelConnector } from "../connectors/excel";
@@ -8,7 +9,6 @@ import { GenericConnector } from "../connectors/generic";
 import { journalRepo, saveRawUploadToArchive } from "../journal";
 import {
   createUserSpace,
-  getPrincipalByIdOrHeader,
   listAuthorizedSpaces,
   resolveContextForUser,
   TenantIsolationError,
@@ -49,9 +49,7 @@ export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 export function resolveHttpContext(req: IncomingMessage, url: URL, explicitSpaceId?: string) {
-  const userHeader = req.headers["x-user-id"];
-  const userId = Array.isArray(userHeader) ? userHeader[0] : userHeader;
-  const user = getPrincipalByIdOrHeader(userId);
+  const user = authenticateRequest(req);
   const spaceId = explicitSpaceId ?? url.searchParams.get("spaceId");
   return { user, ctx: resolveContextForUser(user, spaceId) };
 }
@@ -64,14 +62,12 @@ export async function handleSourcesRoute(
   try {
     await journalRepo.ensureReady();
     if (url.pathname === "/api/spaces" && req.method === "GET") {
-      const userHeader = req.headers["x-user-id"];
-      const user = getPrincipalByIdOrHeader(Array.isArray(userHeader) ? userHeader[0] : userHeader);
+      const user = authenticateRequest(req);
       return sendJson(res, 200, { spaces: listAuthorizedSpaces(user) });
     }
 
     if (url.pathname === "/api/spaces" && req.method === "POST") {
-      const userHeader = req.headers["x-user-id"];
-      const user = getPrincipalByIdOrHeader(Array.isArray(userHeader) ? userHeader[0] : userHeader);
+      const user = authenticateRequest(req);
       const body = (await readJsonBody(req)) as { name?: string; description?: string };
       const ctx = resolveContextForUser(user);
       const space = createUserSpace(ctx.tenantId, user.id, body.name || "Nouvel espace", body.description);
@@ -165,6 +161,7 @@ export async function handleSourcesRoute(
 
     return sendJson(res, 405, { message: "Méthode non supportée" });
   } catch (err) {
+    if (err instanceof AuthUnauthorizedError) return sendJson(res, 401, { message: err.message });
     if (err instanceof TenantIsolationError) return sendJson(res, 403, { message: err.message });
     return sendJson(res, 400, {
       message: err instanceof Error ? err.message : "Erreur sources",

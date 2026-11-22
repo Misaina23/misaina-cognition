@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { AuthUnauthorizedError } from "../auth";
 import { journalRepo, resolveValidationItem, rollbackAgentAction } from "../journal";
 import { TenantIsolationError } from "../tenant";
 import { readJsonBody, resolveHttpContext, sendJson } from "./sources";
@@ -64,6 +65,7 @@ export async function handleActionsRoute(
 
     return sendJson(res, 405, { message: "Méthode non supportée" });
   } catch (err) {
+    if (err instanceof AuthUnauthorizedError) return sendJson(res, 401, { message: err.message });
     if (err instanceof TenantIsolationError) return sendJson(res, 403, { message: err.message });
     return sendJson(res, 400, { message: err instanceof Error ? err.message : "Erreur actions" });
   }

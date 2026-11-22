@@ -1,6 +1,6 @@
-import { Content, GoogleGenAI, Type } from "@google/genai";
 import type { Anomaly, DataRun, TenantSpaceContext } from "../connectors/types";
 import { journalRepo, saveQuarantineSnapshot } from "../journal";
+import { createLlmProvider, type LlmMessage, type LlmProvider } from "../llm/provider";
 import { dispatchRunSummaryNotification } from "../notify/index";
 import { runDeterministicControls, type ProjectRulesConfig } from "../rules/engine";
 import { checkAbnormalAnomalyVolumeGuardrail } from "./guardrails";
@@ -17,6 +17,7 @@ export function executeDeterministicRun(
     recordsSkippedIdempotent?: number;
   }
 ): { run: DataRun; anomaliesCount: number } {
+  const startedMs = Date.now();
   const { config: rules } = journalRepo.getProjectRules(ctx);
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const startedAt = new Date().toISOString();
@@ -41,6 +42,7 @@ export function executeDeterministicRun(
     status: "completed",
     startedAt,
     finishedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedMs,
     recordsIngested: options.recordsIngested ?? 0,
     recordsSkippedIdempotent: options.recordsSkippedIdempotent ?? 0,
     recordsProcessed: activeRecords.length,
@@ -48,6 +50,9 @@ export function executeDeterministicRun(
     anomaliesBySeverity,
     autoActionsCount: 0,
     pendingValidationsCount: 0,
+    llmCallsCount: 0,
+    llmProvider: "deterministic",
+    llmModel: "rules-fallback-v1",
     tokensUsed: 0,
     estimatedCostUsd: 0,
   });
@@ -58,7 +63,8 @@ export function executeDeterministicRun(
 export async function runGuardianAgent(
   ctx: TenantSpaceContext,
   options?: { sourceId?: string; trigger?: DataRun["trigger"]; existingRunId?: string }
-): Promise<{ run: DataRun; verdict: AgentVerdict; usedGemini: boolean }> {
+): Promise<{ run: DataRun; verdict: AgentVerdict; usedGemini: boolean; llmProvider: string; llmModel: string }> {
+  const startedMs = Date.now();
   const { config: rules } = journalRepo.getProjectRules(ctx);
   const sources = journalRepo.listSources(ctx);
   const sourceId = options?.sourceId || sources[0]?.id || "agent-run";
@@ -76,6 +82,7 @@ export async function runGuardianAgent(
     activeRecords,
     openAnomalies,
     rules,
+    startedMs,
   });
   if (guard.aborted) {
     return {
@@ -87,6 +94,8 @@ export async function runGuardianAgent(
         actionsTaken: ["guardrail_abnormal_volume"],
       },
       usedGemini: false,
+      llmProvider: "deterministic",
+      llmModel: "guardrail-v1",
     };
   }
 
@@ -96,6 +105,10 @@ export async function runGuardianAgent(
     const updated = journalRepo.updateRun(ctx, runId, {
       status: "completed",
       finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedMs,
+      llmCallsCount: 0,
+      llmProvider: "deterministic",
+      llmModel: "rules-fallback-v1",
       summaryText: cleanSummary,
       notificationChannels: notif.channels,
     })!;
@@ -103,18 +116,27 @@ export async function runGuardianAgent(
       run: updated,
       verdict: { decision: "completed", confidence: 1, summary: cleanSummary, actionsTaken: [] },
       usedGemini: false,
+      llmProvider: "deterministic",
+      llmModel: "rules-fallback-v1",
     };
   }
 
   const pseudonymizer = new RunPseudonymizer();
   const runtime = createScopedToolRuntime({ ctx, runId, rules, pseudonymizer });
-  let verdict: AgentVerdict | null = null;
-  let usedGemini = false;
-  let tokensUsed = 0;
+  const provider = createLlmProvider();
 
-  if (process.env.GEMINI_API_KEY) {
+  let verdict: AgentVerdict | null = null;
+  let usedLlm = false;
+  let tokensUsed = 0;
+  let estimatedCostUsd = 0;
+  let llmCallsCount = 0;
+  let usedProviderName: string = "deterministic";
+  let usedModelName = "rules-fallback-v1";
+
+  if (provider.providerName !== "deterministic") {
     try {
-      const llmRes = await runGeminiToolLoop({
+      const llmRes = await runLlmToolLoop({
+        provider,
         runId,
         rules,
         runtime,
@@ -123,9 +145,16 @@ export async function runGuardianAgent(
       });
       verdict = llmRes.verdict;
       tokensUsed = llmRes.tokensUsed;
-      usedGemini = true;
+      estimatedCostUsd = llmRes.costUsd;
+      llmCallsCount = llmRes.llmCallsCount;
+      usedProviderName = provider.providerName;
+      usedModelName = provider.modelName;
+      usedLlm = true;
     } catch {
-      // Fallback autonome sûr
+      // Fallback autonome sûr si le fournisseur externe échoue ou dépasse le budget
+      usedProviderName = "deterministic";
+      usedModelName = "rules-fallback-v1";
+      llmCallsCount = 0;
     }
   }
 
@@ -169,100 +198,111 @@ export async function runGuardianAgent(
   const updatedRun = journalRepo.updateRun(ctx, runId, {
     status: runtime.pendingValidationsCount > 0 ? "awaiting_validation" : "completed",
     finishedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedMs,
     autoActionsCount: runtime.autoActionsCount,
     pendingValidationsCount: runtime.pendingValidationsCount,
+    llmCallsCount,
+    llmProvider: usedProviderName,
+    llmModel: usedModelName,
     tokensUsed,
-    estimatedCostUsd: Number(((tokensUsed / 1_000_000) * 0.15).toFixed(6)),
+    estimatedCostUsd,
     summaryText: runtime.summaryWritten || verdict.summary,
     notificationChannels: runtime.notificationChannels,
   })!;
 
-  return { run: updatedRun, verdict, usedGemini };
+  return {
+    run: updatedRun,
+    verdict,
+    usedGemini: usedLlm,
+    llmProvider: usedProviderName,
+    llmModel: usedModelName,
+  };
 }
 
-async function runGeminiToolLoop(params: {
+async function runLlmToolLoop(params: {
+  provider: LlmProvider;
   runId: string;
   rules: ProjectRulesConfig;
   runtime: ReturnType<typeof createScopedToolRuntime>;
   openCount: number;
   recordsCount: number;
-}): Promise<{ verdict: AgentVerdict; tokensUsed: number }> {
-  const { runId, rules, runtime, openCount, recordsCount } = params;
-  const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
-    httpOptions: { headers: { "User-Agent": "aistudio-build" } },
-  });
+}): Promise<{ verdict: AgentVerdict; tokensUsed: number; costUsd: number; llmCallsCount: number }> {
+  const { provider, runId, rules, runtime, openCount, recordsCount } = params;
 
   const systemInstruction = `Agent autonome Gardien de données. Données PII pseudonymisées.
 - Utilisez propose_merge (>= ${rules.duplicateDetection.nearDuplicate.autoMergeThreshold} auto, sinon validation) et request_validation pour outliers, champs vides et écarts GPS/zone d'intervention.
 - Terminez par write_summary puis répondez uniquement en JSON.`;
 
-  const contents: Content[] = [
+  const messages: LlmMessage[] = [
     {
       role: "user",
-      parts: [{ text: `Run ${runId} : ${recordsCount} enregistrements, ${openCount} anomalie(s).` }],
+      text: `Run ${runId} : ${recordsCount} enregistrements, ${openCount} anomalie(s).`,
     },
   ];
 
   let totalTokens = 0;
+  let totalCostUsd = 0;
+  let llmCallsCount = 0;
+
   for (let turn = 0; turn < 10; turn++) {
     if (totalTokens >= rules.guardrails.maxTokensPerRun) throw new Error("Budget tokens dépassé.");
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents,
-      config: {
-        systemInstruction,
-        tools: [{ functionDeclarations: GUARDIAN_TOOL_DECLARATIONS }],
-      },
+    const response = await provider.generate({
+      systemInstruction,
+      messages,
+      tools: GUARDIAN_TOOL_DECLARATIONS,
     });
-    totalTokens += response.usageMetadata?.totalTokenCount ?? 450;
-    const modelContent = response.candidates?.[0]?.content;
-    if (modelContent) contents.push(modelContent);
+    llmCallsCount += 1;
+    totalTokens += response.tokensUsed;
+    totalCostUsd += response.costUsd;
 
-    const calls = response.functionCalls;
-    if (calls && calls.length > 0) {
-      const responseParts = [];
-      for (const call of calls) {
+    if (response.toolCalls.length > 0) {
+      messages.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls });
+      for (const call of response.toolCalls) {
         let out: Record<string, unknown>;
         try {
-          out = await runtime.executeTool(call.name || "", call.args);
+          out = await runtime.executeTool(call.name, call.args);
         } catch (err) {
           out = { error: err instanceof Error ? err.message : "Erreur outil" };
         }
-        responseParts.push({
-          functionResponse: { id: call.id, name: call.name || "", response: out },
+        messages.push({
+          role: "tool",
+          toolResult: { callId: call.id, name: call.name, response: out },
         });
       }
-      contents.push({ role: "user", parts: responseParts });
       continue;
+    }
+    if (response.text) {
+      messages.push({ role: "assistant", text: response.text });
     }
     break;
   }
 
-  const finalResp = await ai.models.generateContent({
-    model: "gemini-3.8-flash",
-    contents: [
-      ...contents,
-      { role: "user", parts: [{ text: "Verdict JSON strict : decision, confidence, summary, actionsTaken." }] },
+  const finalResp = await provider.generate({
+    systemInstruction: "Répondez uniquement avec un objet JSON strict valide.",
+    messages: [
+      ...messages,
+      { role: "user", text: "Verdict JSON strict : decision, confidence, summary, actionsTaken." },
     ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          decision: { type: Type.STRING },
-          confidence: { type: Type.NUMBER },
-          summary: { type: Type.STRING },
-          actionsTaken: { type: Type.ARRAY, items: { type: Type.STRING } },
-        },
-        required: ["decision", "confidence", "summary"],
+    jsonSchema: {
+      type: "object",
+      properties: {
+        decision: { type: "string" },
+        confidence: { type: "number" },
+        summary: { type: "string" },
+        actionsTaken: { type: "array", items: { type: "string" } },
       },
+      required: ["decision", "confidence", "summary"],
     },
   });
-  totalTokens += finalResp.usageMetadata?.totalTokenCount ?? 200;
+  llmCallsCount += 1;
+  totalTokens += finalResp.tokensUsed;
+  totalCostUsd += finalResp.costUsd;
+
   return {
-    verdict: AgentVerdictSchema.parse(JSON.parse((finalResp.text ?? "{}").trim())),
+    verdict: AgentVerdictSchema.parse(JSON.parse((finalResp.text || "{}").trim())),
     tokensUsed: totalTokens,
+    costUsd: Number(totalCostUsd.toFixed(6)),
+    llmCallsCount,
   };
 }
 
@@ -306,11 +346,14 @@ async function runDeterministicAgentFallback(params: {
   )) {
     if (runtime.totalActionsExecuted >= rules.guardrails.maxActionsPerRun - 1) break;
     const isGeo = anom.category === "geo_out_of_bounds";
+    const isCopyPaste = anom.category === "enumerator_copy_paste";
     await runtime.executeTool("request_validation", {
       actionType: anom.severity === "bloquante" ? "archive" : "review_batch",
       title: isGeo
         ? `Validation GPS vs zone d'intervention (${anom.severity})`
-        : `${anom.category} (${anom.severity})`,
+        : isCopyPaste
+          ? `Contrôle MEAL : suspicion copier-coller enquêteur (${anom.severity})`
+          : `${anom.category} (${anom.severity})`,
       description: anom.message,
       primaryRecordId: anom.recordId,
       anomalyId: anom.id,
@@ -319,7 +362,7 @@ async function runDeterministicAgentFallback(params: {
     actionsTaken.push(`request_validation:${anom.category}`);
   }
 
-  const summary = `Analyse sur ${recordsCount} enregistrements (${openAnomalies.length} anomalie(s)) : ${runtime.autoActionsCount} action(s) auto, ${runtime.pendingValidationsCount} en validation humaine.`;
+  const summary = `Contrôle MEAL sur ${recordsCount} enregistrements (${openAnomalies.length} anomalie(s)) : ${runtime.autoActionsCount} action(s) auto, ${runtime.pendingValidationsCount} en validation humaine.`;
   await runtime.executeTool("write_summary", {
     summaryText: summary,
     overallConfidence: 0.9,

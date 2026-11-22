@@ -12,8 +12,9 @@ export async function checkAbnormalAnomalyVolumeGuardrail(params: {
   activeRecords: NormalizedRecord[];
   openAnomalies: Anomaly[];
   rules: ProjectRulesConfig;
+  startedMs?: number;
 }) {
-  const { ctx, runId, activeRecords, openAnomalies, rules } = params;
+  const { ctx, runId, activeRecords, openAnomalies, rules, startedMs } = params;
   const ratio = activeRecords.length > 0 ? openAnomalies.length / activeRecords.length : 0;
 
   if (activeRecords.length >= 5 && ratio > rules.guardrails.maxAbnormalAnomalyRatio) {
@@ -56,6 +57,10 @@ export async function checkAbnormalAnomalyVolumeGuardrail(params: {
     const updated = journalRepo.updateRun(ctx, runId, {
       status: "aborted_guardrail",
       finishedAt: new Date().toISOString(),
+      durationMs: startedMs ? Date.now() - startedMs : 0,
+      llmCallsCount: 0,
+      llmProvider: "deterministic",
+      llmModel: "guardrail-v1",
       pendingValidationsCount: 1,
       summaryText,
       notificationChannels: notif.channels,

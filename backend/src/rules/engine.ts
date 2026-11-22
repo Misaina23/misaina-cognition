@@ -112,6 +112,17 @@ export const ProjectRulesSchema = z.object({
       maxTokensPerRun: 16000,
       minAgentConfidence: 0.65,
     }),
+  enumeratorQuality: z
+    .object({
+      enabled: z.boolean().default(true),
+      minRepeatedSubmissions: z.number().int().min(2).default(3),
+      severity: SeveritySchema.default("bloquante"),
+    })
+    .default({
+      enabled: true,
+      minRepeatedSubmissions: 3,
+      severity: "bloquante",
+    }),
 });
 
 export type ProjectRulesConfig = z.infer<typeof ProjectRulesSchema>;
@@ -375,6 +386,64 @@ export function runDeterministicControls(params: {
             severity,
             message: `Quasi-doublon détecté (${Math.round(score * 100)}%) avec ${recA.externalId} : ${reason}.`,
             similarityScore: score,
+          });
+        }
+      }
+    }
+  }
+
+  if (rules.enumeratorQuality?.enabled !== false) {
+    const minRepeat = rules.enumeratorQuality?.minRepeatedSubmissions ?? 3;
+    const enumSev = rules.enumeratorQuality?.severity ?? "bloquante";
+    const byEnumerator = new Map<string, Map<string, NormalizedRecord[]>>();
+
+    for (const rec of records) {
+      if (!rec.enumeratorId) continue;
+      const enumKey = normalizeText(rec.enumeratorId);
+      if (!enumKey) continue;
+
+      const extraKeys = Object.keys(rec.extra || {})
+        .filter((k) => !/time|date|uuid|id|index/i.test(k))
+        .sort();
+      const extraSig = extraKeys.map((k) => `${k}=${normalizeText(String(rec.extra[k] ?? ""))}`).join("&");
+      const responseSig = [
+        normalizeText(rec.zone),
+        rec.age ?? "",
+        rec.amount ?? "",
+        rec.latitude !== null ? rec.latitude.toFixed(4) : "",
+        rec.longitude !== null ? rec.longitude.toFixed(4) : "",
+        extraSig,
+      ].join("|");
+
+      // Ne pas signaler si aucune réponse utile n'est présente
+      if (responseSig.replace(/\|/g, "").length === 0) continue;
+
+      let enumMap = byEnumerator.get(enumKey);
+      if (!enumMap) {
+        enumMap = new Map<string, NormalizedRecord[]>();
+        byEnumerator.set(enumKey, enumMap);
+      }
+      const list = enumMap.get(responseSig) || [];
+      list.push(rec);
+      enumMap.set(responseSig, list);
+    }
+
+    for (const enumMap of byEnumerator.values()) {
+      for (const group of enumMap.values()) {
+        if (group.length < minRepeat) continue;
+        const leader = group[0];
+        for (let i = 1; i < group.length; i++) {
+          const rec = group[i];
+          const pairKey = [leader.id, rec.id].sort().join("::");
+          if (flaggedPairs.has(pairKey)) continue;
+          pushAnomaly({
+            recordId: rec.id,
+            relatedRecordId: leader.id,
+            ruleId: "enumerator_copy_paste",
+            category: "enumerator_copy_paste",
+            severity: enumSev,
+            field: "enumeratorId",
+            message: `Suspicion de copier-coller par l'enquêteur « ${rec.enumeratorId} » (${group.length} fiches aux réponses identiques, dont ${leader.externalId} et ${rec.externalId}).`,
           });
         }
       }

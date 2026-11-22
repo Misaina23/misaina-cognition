@@ -1,22 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { ArrowRight, FolderKanban, Plus, ShieldAlert, UserCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowRight, FolderKanban, LogOut, Plus, ShieldAlert, UserCheck } from "lucide-react";
 import {
-  getActiveUserId,
   guardianApi,
-  setActiveUserId,
+  isUnauthorizedError,
+  type AuthUser,
   type UserSpace,
 } from "@/lib/api";
 
-const PROFILES = [
-  { id: "u-1", label: "Direction Exécutive (Admin)" },
-  { id: "u-3", label: "Opérations Sahel - Dakar" },
-];
-
 export default function HomeSpacesPage() {
-  const [userId, setUserId] = useState("u-1");
+  const router = useRouter();
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,23 +21,32 @@ export default function HomeSpacesPage() {
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
 
-  async function loadSpaces() {
+  const loadSessionAndSpaces = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await guardianApi.getSpaces();
-      setSpaces(data.spaces || []);
-    } catch {
-      setError("Impossible de charger les espaces depuis le backend.");
+      const me = await guardianApi.me();
+      setUser(me.user);
+      setSpaces(me.spaces || []);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+        return;
+      }
+      setError("Impossible de vérifier la session ou de charger les espaces.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [router]);
 
   useEffect(() => {
-    setUserId(getActiveUserId());
-    void loadSpaces();
-  }, []);
+    void loadSessionAndSpaces();
+  }, [loadSessionAndSpaces]);
+
+  async function handleLogout() {
+    await guardianApi.logout();
+    router.replace("/login");
+  }
 
   async function handleCreateSpace(e: React.FormEvent) {
     e.preventDefault();
@@ -51,8 +57,12 @@ export default function HomeSpacesPage() {
       await guardianApi.createSpace(newName.trim(), newDesc.trim());
       setNewName("");
       setNewDesc("");
-      await loadSpaces();
-    } catch {
+      await loadSessionAndSpaces();
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+        return;
+      }
       setError("Création de l'espace impossible.");
     } finally {
       setCreating(false);
@@ -68,33 +78,41 @@ export default function HomeSpacesPage() {
               <ShieldAlert size={20} />
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Gardien de données autonome
+              Plateforme MEAL autonome
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Sélectionnez un espace isolé pour inspecter les runs, anomalies GPS/zone, doublons et validations.
+            Monitoring, Evaluation, Accountability &amp; Learning — Sélectionnez un espace isolé pour piloter les collectes, anomalies GPS/zone, enquêteurs et validations.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs">
-          <UserCheck size={14} className="text-muted-foreground" />
-          <select
-            aria-label="Profil tenant"
-            value={userId}
-            onChange={(e) => {
-              const next = e.target.value;
-              setActiveUserId(next);
-              setUserId(next);
-              void loadSpaces();
-            }}
-            className="bg-transparent font-medium text-foreground outline-none"
-          >
-            {PROFILES.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center gap-2">
+          {user ? (
+            <>
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs">
+                <UserCheck size={14} className="text-emerald-600" />
+                <div>
+                  <span className="font-medium text-foreground">{user.fullName}</span>
+                  <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
+                    ({user.role})
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => void handleLogout()}
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                <LogOut size={13} /> Déconnexion
+              </button>
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+            >
+              Se connecter
+            </Link>
+          )}
         </div>
       </header>
 
@@ -112,7 +130,7 @@ export default function HomeSpacesPage() {
           </h2>
 
           {loading ? (
-            <p className="text-xs text-muted-foreground">Chargement des espaces…</p>
+            <p className="text-xs text-muted-foreground">Chargement de la session et des espaces…</p>
           ) : spaces.length === 0 ? (
             <p className="text-xs text-muted-foreground">Aucun espace trouvé pour ce tenant.</p>
           ) : (

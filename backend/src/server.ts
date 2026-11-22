@@ -1,18 +1,22 @@
 import http from "node:http";
 import { checkPgHealth, closePgPool } from "./pgStore";
 import { handleActionsRoute } from "./routes/actions";
+import { handleAuthRoute } from "./routes/auth";
 import { handleRunsRoute } from "./routes/runs";
 import { handleSourcesRoute, sendJson } from "./routes/sources";
 import { startWorker, stopWorker } from "./worker";
 
 const PORT = Number(process.env.BACKEND_PORT || process.env.PORT || 4000);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
 
 export function createGuardianServer() {
   return http.createServer(async (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
+    const requestOrigin = req.headers.origin;
+    res.setHeader("Access-Control-Allow-Origin", requestOrigin || CORS_ORIGIN);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,X-User-Id");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -26,9 +30,12 @@ export function createGuardianServer() {
       const health = await checkPgHealth();
       return sendJson(res, health.ok ? 200 : 503, {
         status: health.ok ? "ok" : "error",
-        service: "gardien-donnees-backend",
+        service: "misaina-meal-backend",
         storage: health.storage,
       });
+    }
+    if (url.pathname.startsWith("/api/auth")) {
+      return handleAuthRoute(req, res, url);
     }
     if (url.pathname.startsWith("/api/sources") || url.pathname.startsWith("/api/spaces")) {
       return handleSourcesRoute(req, res, url);
@@ -36,7 +43,10 @@ export function createGuardianServer() {
     if (
       url.pathname.startsWith("/api/runs") ||
       url.pathname.startsWith("/api/rules") ||
-      url.pathname.startsWith("/api/records")
+      url.pathname.startsWith("/api/records") ||
+      url.pathname.startsWith("/api/evaluation") ||
+      url.pathname.startsWith("/api/reports") ||
+      url.pathname.startsWith("/api/query")
     ) {
       return handleRunsRoute(req, res, url);
     }

@@ -15,13 +15,13 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Misaina Cognition — Gardien de données",
+  title: "Misaina Cognition — Plateforme MEAL autonome",
   description:
-    "Plateforme autonome de contrôle qualité, déduplication et validation géographique des données terrain.",
+    "Plateforme MEAL (Monitoring, Evaluation, Accountability & Learning) : contrôle qualité autonome, déduplication, GPS/zone et suivi des enquêteurs.",
   openGraph: {
-    title: "Misaina Cognition — Gardien de données",
+    title: "Misaina Cognition — Plateforme MEAL autonome",
     description:
-      "Plateforme autonome de contrôle qualité, déduplication et validation géographique des données terrain.",
+      "Plateforme MEAL (Monitoring, Evaluation, Accountability & Learning) : contrôle qualité autonome, déduplication, GPS/zone et suivi des enquêteurs.",
   },
 };
 

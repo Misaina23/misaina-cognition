@@ -8,6 +8,8 @@ import type {
   DataSourceConfig,
   NormalizedRecord,
   RawRecord,
+  RuleFeedbackStat,
+  RuleThresholdSuggestion,
   TenantSpaceContext,
   ValidationItem,
 } from "./connectors/types";
@@ -24,6 +26,7 @@ import {
   upsertAnomalyPg,
   upsertNormalizedRecordPg,
   upsertProjectRulesPg,
+  upsertRuleFeedbackPg,
   upsertRunPg,
   upsertSourcePg,
   upsertSpacePg,
@@ -39,6 +42,7 @@ interface JournalState {
   agentActions: AgentAction[];
   validationQueue: ValidationItem[];
   rulesYamlBySpace: Map<string, string>;
+  ruleFeedback: RuleFeedbackStat[];
 }
 
 const state: JournalState = {
@@ -72,6 +76,7 @@ const state: JournalState = {
   agentActions: [],
   validationQueue: [],
   rulesYamlBySpace: new Map(),
+  ruleFeedback: [],
 };
 
 function safeSeg(v: string): string {
@@ -124,6 +129,7 @@ function hydrateStateOnce(): void {
       agentActions?: AgentAction[];
       validationQueue?: ValidationItem[];
       rulesYamlBySpace?: Array<[string, string]>;
+      ruleFeedback?: RuleFeedbackStat[];
     };
     if (Array.isArray(parsed.spaces) && parsed.spaces.length > 0) {
       tenantSpacesRegistry.splice(0, tenantSpacesRegistry.length, ...parsed.spaces);
@@ -141,6 +147,9 @@ function hydrateStateOnce(): void {
     if (Array.isArray(parsed.validationQueue)) state.validationQueue = parsed.validationQueue;
     if (Array.isArray(parsed.rulesYamlBySpace)) {
       state.rulesYamlBySpace = new Map(parsed.rulesYamlBySpace);
+    }
+    if (Array.isArray(parsed.ruleFeedback)) {
+      state.ruleFeedback = parsed.ruleFeedback;
     }
   } catch (err) {
     console.error("Impossible de restaurer backend/data/journal-state.json :", err);
@@ -166,6 +175,7 @@ function persistStateToDisk(): void {
           agentActions: state.agentActions,
           validationQueue: state.validationQueue,
           rulesYamlBySpace: Array.from(state.rulesYamlBySpace.entries()),
+          ruleFeedback: state.ruleFeedback,
         },
         null,
         2
@@ -261,6 +271,7 @@ export const journalRepo = {
       state.anomalies = snap.anomalies;
       state.validationQueue = snap.validations;
       state.agentActions = snap.agentActions;
+      state.ruleFeedback = snap.ruleFeedback || [];
       journalPgHydrated = true;
       journalHydrated = true;
     }
@@ -594,6 +605,91 @@ export const journalRepo = {
     persistStateToDisk();
     return item;
   },
+
+  recordRuleFeedback(
+    ctx: TenantSpaceContext,
+    ruleId: string,
+    decision: "approved" | "rejected"
+  ): RuleFeedbackStat {
+    hydrateStateOnce();
+    const now = new Date().toISOString();
+    let stat = state.ruleFeedback.find(
+      (f) => f.tenantId === ctx.tenantId && f.spaceId === ctx.spaceId && f.ruleId === ruleId
+    );
+    if (!stat) {
+      stat = {
+        tenantId: ctx.tenantId,
+        spaceId: ctx.spaceId,
+        ruleId,
+        approvedCount: 0,
+        rejectedCount: 0,
+        totalCount: 0,
+        rejectionRate: 0,
+        updatedAt: now,
+      };
+      state.ruleFeedback.push(stat);
+    }
+    if (decision === "approved") stat.approvedCount += 1;
+    else stat.rejectedCount += 1;
+    stat.totalCount = stat.approvedCount + stat.rejectedCount;
+    stat.rejectionRate =
+      stat.totalCount > 0 ? Number((stat.rejectedCount / stat.totalCount).toFixed(4)) : 0;
+    stat.updatedAt = now;
+    enqueuePgTask((pool) => upsertRuleFeedbackPg(pool, stat!));
+    persistStateToDisk();
+    return stat;
+  },
+
+  listRuleFeedback(ctx: TenantSpaceContext): RuleFeedbackStat[] {
+    hydrateStateOnce();
+    return state.ruleFeedback.filter(
+      (f) => f.tenantId === ctx.tenantId && f.spaceId === ctx.spaceId
+    );
+  },
+
+  getRuleThresholdSuggestions(ctx: TenantSpaceContext): RuleThresholdSuggestion[] {
+    const stats = this.listRuleFeedback(ctx);
+    const { config: rules } = this.getProjectRules(ctx);
+    const suggestions: RuleThresholdSuggestion[] = [];
+
+    for (const st of stats) {
+      if (st.rejectedCount < 2 || st.rejectionRate <= 0.6) continue;
+      let currentSetting = "Règle active";
+      let suggestedAction = "Passer la sévérité à mineure ou élargir le seuil.";
+
+      if (st.ruleId === "near_duplicate_similarity") {
+        const cur = rules.duplicateDetection.nearDuplicate.reviewThreshold;
+        const next = Math.min(0.93, Number((cur + 0.05).toFixed(2)));
+        currentSetting = `reviewThreshold=${cur}`;
+        suggestedAction = `Relâcher reviewThreshold vers ${next} (ou autoMergeThreshold=${rules.duplicateDetection.nearDuplicate.autoMergeThreshold}) pour réduire les faux positifs.`;
+      } else if (st.ruleId === "range_amount" && rules.ranges.amount) {
+        const curMax = rules.ranges.amount.max;
+        currentSetting = `amount=[${rules.ranges.amount.min}, ${curMax}]`;
+        suggestedAction = `Élargir le plafond amount.max de ${curMax} à ${Math.round(curMax * 1.5)}.`;
+      } else if (st.ruleId === "range_age" && rules.ranges.age) {
+        currentSetting = `age=[${rules.ranges.age.min}, ${rules.ranges.age.max}]`;
+        suggestedAction = `Vérifier les bornes age (max=${rules.ranges.age.max}) ou passer severity=a_verifier.`;
+      } else if (st.ruleId === "geo_zone_mismatch" || st.ruleId === "geo_bounds") {
+        currentSetting = `geoBounds.mismatchSeverity=${rules.geoBounds?.mismatchSeverity ?? "a_verifier"}`;
+        suggestedAction = `Élargir légèrement les boîtes geoBounds.interventionZones pour la zone concernée.`;
+      } else if (st.ruleId.startsWith("required_")) {
+        const field = st.ruleId.replace("required_", "");
+        currentSetting = `requiredFields[${field}]`;
+        suggestedAction = `Assouplir la sévérité de ${field} vers mineure dans le YAML si ce champ est optionnel sur le terrain.`;
+      }
+
+      suggestions.push({
+        ruleId: st.ruleId,
+        rejectionRate: st.rejectionRate,
+        rejectedCount: st.rejectedCount,
+        totalCount: st.totalCount,
+        currentSetting,
+        suggestedAction,
+        rationale: `Taux de rejet humain de ${Math.round(st.rejectionRate * 100)} % (${st.rejectedCount}/${st.totalCount} décisions). Proposition uniquement — aucune modification automatique du YAML.`,
+      });
+    }
+    return suggestions;
+  },
 };
 
 export function executeReversibleMerge(params: {
@@ -876,6 +972,14 @@ export function resolveValidationItem(
       reverted: false,
     });
   }
+
+  const linkedAnomaly = item.anomalyId
+    ? journalRepo.listAnomalies(ctx).find((a) => a.id === item.anomalyId)
+    : undefined;
+  const feedbackRuleId =
+    linkedAnomaly?.ruleId ||
+    (item.actionType === "merge" ? "near_duplicate_similarity" : "general_review");
+  journalRepo.recordRuleFeedback(ctx, feedbackRuleId, decision);
 
   journalRepo.syncValidationPg(item);
   journalRepo.persistState();

@@ -3,13 +3,16 @@ import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import cron, { type ScheduledTask } from "node-cron";
 import { executeDeterministicRun, runGuardianAgent } from "./agent/agent";
+import { CommCareConnector } from "./connectors/commcare";
 import { CsvConnector } from "./connectors/csv";
 import { ExcelConnector } from "./connectors/excel";
+import { GenericConnector } from "./connectors/generic";
 import type { DataRun, TenantSpaceContext } from "./connectors/types";
 import { ensureSpaceDirectories, journalRepo, moveInboxFile } from "./journal";
 import { tenantSpacesRegistry } from "./tenant";
 
 let cronTask: ScheduledTask | undefined;
+let pollTask: ScheduledTask | undefined;
 let inboxWatcher: FSWatcher | undefined;
 const processingFiles = new Set<string>();
 
@@ -33,6 +36,48 @@ export function runNightlyCheckAllSpaces(): {
     runs.push(run);
   }
   return { executedAt: new Date().toISOString(), spacesChecked: runs.length, runs };
+}
+
+/**
+ * Synchronisation autonome des connecteurs API (CommCare, Kobo, ODK) configurés avec endpointUrl.
+ */
+export async function pollApiSourcesAllSpaces(): Promise<{
+  polledAt: string;
+  sourcesPolled: number;
+  runsTriggered: number;
+}> {
+  await journalRepo.ensureReady();
+  let sourcesPolled = 0;
+  let runsTriggered = 0;
+
+  for (const ctx of journalRepo.listAllSpaceContexts()) {
+    for (const src of journalRepo.listSources(ctx)) {
+      if (src.status !== "ACTIVE") continue;
+      if (src.type !== "commcare" && src.type !== "generic") continue;
+      if (src.type === "generic" && !src.endpointUrl) continue;
+      if (
+        src.type === "commcare" &&
+        !src.endpointUrl &&
+        (!process.env.COMMCARE_DOMAIN || !process.env.COMMCARE_USERNAME || !process.env.COMMCARE_API_KEY)
+      ) {
+        continue;
+      }
+
+      try {
+        const connector = src.type === "commcare" ? new CommCareConnector() : new GenericConnector();
+        const ingestRes = await connector.ingest({ source: src }, ctx);
+        sourcesPolled += 1;
+        if (ingestRes.insertedCount > 0) {
+          await runGuardianAgent(ctx, { sourceId: src.id, trigger: "submission" });
+          runsTriggered += 1;
+        }
+      } catch (err) {
+        console.warn(`Échec synchro autonome source ${src.id}:`, err);
+      }
+    }
+  }
+  await journalRepo.flushPg();
+  return { polledAt: new Date().toISOString(), sourcesPolled, runsTriggered };
 }
 
 export async function processInboxFilePath(filePath: string): Promise<boolean> {
@@ -94,7 +139,7 @@ export async function processInboxFilePath(filePath: string): Promise<boolean> {
 }
 
 /**
- * Démarre node-cron (tâche nocturne 02h00 UTC) + chokidar (surveillance inbox).
+ * Démarre node-cron (tâche nocturne 02h00 UTC + polling MEAL API) et chokidar (surveillance inbox).
  */
 export function startWorker() {
   if (!cronTask) {
@@ -105,6 +150,17 @@ export function startWorker() {
           runNightlyCheckAllSpaces();
           return journalRepo.flushPg();
         });
+      },
+      { timezone: "UTC" }
+    );
+  }
+
+  if (!pollTask) {
+    const pollSchedule = process.env.MEAL_POLL_CRON || "*/15 * * * *";
+    pollTask = cron.schedule(
+      pollSchedule,
+      () => {
+        void pollApiSourcesAllSpaces();
       },
       { timezone: "UTC" }
     );
@@ -130,6 +186,10 @@ export async function stopWorker() {
   if (cronTask) {
     cronTask.stop();
     cronTask = undefined;
+  }
+  if (pollTask) {
+    pollTask.stop();
+    pollTask = undefined;
   }
   if (inboxWatcher) {
     await inboxWatcher.close();

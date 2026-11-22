@@ -8,6 +8,7 @@ import type {
   DataSourceConfig,
   NormalizedRecord,
   RawRecord,
+  RuleFeedbackStat,
   UserSpace,
   ValidationItem,
 } from "./connectors/types";
@@ -168,6 +169,7 @@ CREATE TABLE IF NOT EXISTS guardian_normalized_records (
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
   zone TEXT,
+  enumerator_id TEXT,
   status TEXT NOT NULL,
   merged_into_id TEXT,
   archived_at TEXT,
@@ -176,6 +178,7 @@ CREATE TABLE IF NOT EXISTS guardian_normalized_records (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+ALTER TABLE guardian_normalized_records ADD COLUMN IF NOT EXISTS enumerator_id TEXT;
 CREATE TABLE IF NOT EXISTS guardian_project_rules (
   tenant_id TEXT NOT NULL,
   space_id TEXT NOT NULL,
@@ -192,6 +195,7 @@ CREATE TABLE IF NOT EXISTS guardian_runs (
   status TEXT NOT NULL,
   started_at TEXT NOT NULL,
   finished_at TEXT,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
   records_ingested INTEGER NOT NULL DEFAULT 0,
   records_skipped_idempotent INTEGER NOT NULL DEFAULT 0,
   records_processed INTEGER NOT NULL DEFAULT 0,
@@ -199,10 +203,26 @@ CREATE TABLE IF NOT EXISTS guardian_runs (
   anomalies_by_severity JSONB NOT NULL DEFAULT '{}'::jsonb,
   auto_actions_count INTEGER NOT NULL DEFAULT 0,
   pending_validations_count INTEGER NOT NULL DEFAULT 0,
+  llm_calls_count INTEGER NOT NULL DEFAULT 0,
+  llm_provider TEXT,
+  llm_model TEXT,
   tokens_used INTEGER NOT NULL DEFAULT 0,
   estimated_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   summary_text TEXT,
   notification_channels JSONB
+);
+ALTER TABLE guardian_runs ADD COLUMN IF NOT EXISTS duration_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE guardian_runs ADD COLUMN IF NOT EXISTS llm_calls_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE guardian_runs ADD COLUMN IF NOT EXISTS llm_provider TEXT;
+ALTER TABLE guardian_runs ADD COLUMN IF NOT EXISTS llm_model TEXT;
+CREATE TABLE IF NOT EXISTS guardian_rule_feedback (
+  tenant_id TEXT NOT NULL,
+  space_id TEXT NOT NULL,
+  rule_id TEXT NOT NULL,
+  approved_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, space_id, rule_id)
 );
 CREATE TABLE IF NOT EXISTS guardian_anomalies (
   id TEXT PRIMARY KEY,
@@ -304,7 +324,7 @@ export async function initAndHydrateFromPg(seedDefaults: {
   if (!ok) return null;
   await flushPgQueue();
 
-  const [spacesRes, sourcesRes, rawRes, normRes, rulesRes, runsRes, anomRes, valRes, actRes] =
+  const [spacesRes, sourcesRes, rawRes, normRes, rulesRes, runsRes, anomRes, valRes, actRes, fbRes] =
     await Promise.all([
       pool.query("SELECT * FROM guardian_spaces ORDER BY created_at ASC"),
       pool.query("SELECT * FROM guardian_sources ORDER BY created_at ASC"),
@@ -315,6 +335,7 @@ export async function initAndHydrateFromPg(seedDefaults: {
       pool.query("SELECT * FROM guardian_anomalies ORDER BY created_at DESC"),
       pool.query("SELECT * FROM guardian_validations ORDER BY created_at DESC"),
       pool.query("SELECT * FROM agent_actions ORDER BY timestamp DESC"),
+      pool.query("SELECT * FROM guardian_rule_feedback"),
     ]);
 
   return {
@@ -381,6 +402,7 @@ export async function initAndHydrateFromPg(seedDefaults: {
       latitude: r.latitude === null || r.latitude === undefined ? null : Number(r.latitude),
       longitude: r.longitude === null || r.longitude === undefined ? null : Number(r.longitude),
       zone: r.zone ?? null,
+      enumeratorId: r.enumerator_id ?? null,
       status: r.status,
       mergedIntoId: r.merged_into_id ?? undefined,
       archivedAt: r.archived_at ?? undefined,
@@ -399,6 +421,7 @@ export async function initAndHydrateFromPg(seedDefaults: {
       status: r.status,
       startedAt: r.started_at,
       finishedAt: r.finished_at ?? undefined,
+      durationMs: Number(r.duration_ms ?? 0),
       recordsIngested: Number(r.records_ingested ?? 0),
       recordsSkippedIdempotent: Number(r.records_skipped_idempotent ?? 0),
       recordsProcessed: Number(r.records_processed ?? 0),
@@ -406,6 +429,9 @@ export async function initAndHydrateFromPg(seedDefaults: {
       anomaliesBySeverity: r.anomalies_by_severity ?? { bloquante: 0, a_verifier: 0, mineure: 0 },
       autoActionsCount: Number(r.auto_actions_count ?? 0),
       pendingValidationsCount: Number(r.pending_validations_count ?? 0),
+      llmCallsCount: Number(r.llm_calls_count ?? 0),
+      llmProvider: r.llm_provider ?? undefined,
+      llmModel: r.llm_model ?? undefined,
       tokensUsed: Number(r.tokens_used ?? 0),
       estimatedCostUsd: Number(r.estimated_cost_usd ?? 0),
       summaryText: r.summary_text ?? undefined,
@@ -467,6 +493,21 @@ export async function initAndHydrateFromPg(seedDefaults: {
       revertedBy: r.reverted_by ?? undefined,
       snapshotBefore: r.snapshot_before ?? undefined,
     })) as AgentAction[],
+    ruleFeedback: fbRes.rows.map((r) => {
+      const approved = Number(r.approved_count ?? 0);
+      const rejected = Number(r.rejected_count ?? 0);
+      const total = approved + rejected;
+      return {
+        tenantId: r.tenant_id,
+        spaceId: r.space_id,
+        ruleId: r.rule_id,
+        approvedCount: approved,
+        rejectedCount: rejected,
+        totalCount: total,
+        rejectionRate: total > 0 ? Number((rejected / total).toFixed(4)) : 0,
+        updatedAt: r.updated_at,
+      } satisfies RuleFeedbackStat;
+    }),
   };
 }
 
@@ -523,20 +564,20 @@ export async function upsertNormalizedRecordPg(pool: Pool, rec: NormalizedRecord
     `INSERT INTO guardian_normalized_records (
        id, tenant_id, space_id, raw_record_id, source_id, source_type, external_id,
        payload_hash, record_key, full_name, phone, email, age, amount, currency,
-       recorded_at, latitude, longitude, zone, status, merged_into_id, archived_at,
+       recorded_at, latitude, longitude, zone, enumerator_id, status, merged_into_id, archived_at,
        archived_reason, extra, created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::jsonb,$25,$26)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25::jsonb,$26,$27)
      ON CONFLICT (id) DO UPDATE SET
        full_name = EXCLUDED.full_name, phone = EXCLUDED.phone, email = EXCLUDED.email,
        age = EXCLUDED.age, amount = EXCLUDED.amount, currency = EXCLUDED.currency,
        recorded_at = EXCLUDED.recorded_at, latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude,
-       zone = EXCLUDED.zone, status = EXCLUDED.status, merged_into_id = EXCLUDED.merged_into_id,
-       archived_at = EXCLUDED.archived_at, archived_reason = EXCLUDED.archived_reason,
-       extra = EXCLUDED.extra, updated_at = EXCLUDED.updated_at`,
+       zone = EXCLUDED.zone, enumerator_id = EXCLUDED.enumerator_id, status = EXCLUDED.status,
+       merged_into_id = EXCLUDED.merged_into_id, archived_at = EXCLUDED.archived_at,
+       archived_reason = EXCLUDED.archived_reason, extra = EXCLUDED.extra, updated_at = EXCLUDED.updated_at`,
     [
       rec.id, rec.tenantId, rec.spaceId, rec.rawRecordId, rec.sourceId, rec.sourceType, rec.externalId,
       rec.payloadHash, rec.recordKey, rec.fullName, rec.phone, rec.email, rec.age, rec.amount,
-      rec.currency, rec.recordedAt, rec.latitude, rec.longitude, rec.zone, rec.status,
+      rec.currency, rec.recordedAt, rec.latitude, rec.longitude, rec.zone, rec.enumeratorId ?? null, rec.status,
       rec.mergedIntoId ?? null, rec.archivedAt ?? null, rec.archivedReason ?? null,
       JSON.stringify(rec.extra ?? {}), rec.createdAt, rec.updatedAt,
     ]
@@ -556,24 +597,27 @@ export async function upsertRunPg(pool: Pool, run: DataRun): Promise<void> {
   await pool.query(
     `INSERT INTO guardian_runs (
        id, tenant_id, space_id, source_id, trigger, status, started_at, finished_at,
-       records_ingested, records_skipped_idempotent, records_processed, duplicates_found,
+       duration_ms, records_ingested, records_skipped_idempotent, records_processed, duplicates_found,
        anomalies_by_severity, auto_actions_count, pending_validations_count,
-       tokens_used, estimated_cost_usd, summary_text, notification_channels
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19::jsonb)
+       llm_calls_count, llm_provider, llm_model, tokens_used, estimated_cost_usd,
+       summary_text, notification_channels
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb)
      ON CONFLICT (id) DO UPDATE SET
-       status = EXCLUDED.status, finished_at = EXCLUDED.finished_at,
+       status = EXCLUDED.status, finished_at = EXCLUDED.finished_at, duration_ms = EXCLUDED.duration_ms,
        records_ingested = EXCLUDED.records_ingested, records_skipped_idempotent = EXCLUDED.records_skipped_idempotent,
        records_processed = EXCLUDED.records_processed, duplicates_found = EXCLUDED.duplicates_found,
        anomalies_by_severity = EXCLUDED.anomalies_by_severity, auto_actions_count = EXCLUDED.auto_actions_count,
-       pending_validations_count = EXCLUDED.pending_validations_count, tokens_used = EXCLUDED.tokens_used,
+       pending_validations_count = EXCLUDED.pending_validations_count, llm_calls_count = EXCLUDED.llm_calls_count,
+       llm_provider = EXCLUDED.llm_provider, llm_model = EXCLUDED.llm_model, tokens_used = EXCLUDED.tokens_used,
        estimated_cost_usd = EXCLUDED.estimated_cost_usd, summary_text = EXCLUDED.summary_text,
        notification_channels = EXCLUDED.notification_channels`,
     [
       run.id, run.tenantId, run.spaceId, run.sourceId, run.trigger, run.status, run.startedAt,
-      run.finishedAt ?? null, run.recordsIngested, run.recordsSkippedIdempotent, run.recordsProcessed,
-      run.duplicatesFound, JSON.stringify(run.anomaliesBySeverity), run.autoActionsCount,
-      run.pendingValidationsCount, run.tokensUsed, run.estimatedCostUsd, run.summaryText ?? null,
-      run.notificationChannels ? JSON.stringify(run.notificationChannels) : null,
+      run.finishedAt ?? null, run.durationMs ?? 0, run.recordsIngested, run.recordsSkippedIdempotent,
+      run.recordsProcessed, run.duplicatesFound, JSON.stringify(run.anomaliesBySeverity),
+      run.autoActionsCount, run.pendingValidationsCount, run.llmCallsCount ?? 0,
+      run.llmProvider ?? null, run.llmModel ?? null, run.tokensUsed, run.estimatedCostUsd,
+      run.summaryText ?? null, run.notificationChannels ? JSON.stringify(run.notificationChannels) : null,
     ]
   );
 }
@@ -632,5 +676,17 @@ export async function upsertValidationItemPg(pool: Pool, v: ValidationItem): Pro
       v.primaryRecordId, v.secondaryRecordId ?? null, v.confidence, JSON.stringify(v.proposedPayload ?? {}),
       v.status, v.decidedBy ?? null, v.decidedAt ?? null, v.createdAt,
     ]
+  );
+}
+
+export async function upsertRuleFeedbackPg(pool: Pool, stat: RuleFeedbackStat): Promise<void> {
+  await pool.query(
+    `INSERT INTO guardian_rule_feedback (tenant_id, space_id, rule_id, approved_count, rejected_count, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (tenant_id, space_id, rule_id) DO UPDATE SET
+       approved_count = EXCLUDED.approved_count,
+       rejected_count = EXCLUDED.rejected_count,
+       updated_at = EXCLUDED.updated_at`,
+    [stat.tenantId, stat.spaceId, stat.ruleId, stat.approvedCount, stat.rejectedCount, stat.updatedAt]
   );
 }

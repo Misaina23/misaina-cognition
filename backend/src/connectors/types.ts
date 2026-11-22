@@ -84,6 +84,7 @@ export const NormalizedRecordSchema = z.object({
   latitude: z.number().nullable(),
   longitude: z.number().nullable(),
   zone: z.string().nullable(),
+  enumeratorId: z.string().nullable().default(null),
   status: z.enum(["active", "archived", "merged"]),
   mergedIntoId: z.string().optional(),
   archivedAt: z.string().optional(),
@@ -111,7 +112,8 @@ export interface Anomaly {
     | "outlier"
     | "missing_required"
     | "geo_out_of_bounds"
-    | "format";
+    | "format"
+    | "enumerator_copy_paste";
   severity: AnomalySeverity;
   field?: string;
   message: string;
@@ -129,6 +131,7 @@ export interface DataRun {
   status: "running" | "completed" | "awaiting_validation" | "failed" | "aborted_guardrail";
   startedAt: string;
   finishedAt?: string;
+  durationMs?: number;
   recordsIngested: number;
   recordsSkippedIdempotent: number;
   recordsProcessed: number;
@@ -136,10 +139,34 @@ export interface DataRun {
   anomaliesBySeverity: Record<AnomalySeverity, number>;
   autoActionsCount: number;
   pendingValidationsCount: number;
+  llmCallsCount?: number;
+  llmProvider?: string;
+  llmModel?: string;
   tokensUsed: number;
   estimatedCostUsd: number;
   summaryText?: string;
   notificationChannels?: string[];
+}
+
+export interface RuleFeedbackStat {
+  tenantId: string;
+  spaceId: string;
+  ruleId: string;
+  approvedCount: number;
+  rejectedCount: number;
+  totalCount: number;
+  rejectionRate: number;
+  updatedAt: string;
+}
+
+export interface RuleThresholdSuggestion {
+  ruleId: string;
+  rejectionRate: number;
+  rejectedCount: number;
+  totalCount: number;
+  currentSetting: string;
+  suggestedAction: string;
+  rationale: string;
 }
 
 export interface ValidationItem {
@@ -241,7 +268,20 @@ const FIELD_ALIASES: Record<string, string[]> = {
   recordedAt: ["recorded_at", "date", "submitted_at", "submission_time", "_submission_time", "received_on", "created_at", "date_collecte"],
   latitude: ["latitude", "lat", "gps_lat", "geo_lat"],
   longitude: ["longitude", "lon", "lng", "long", "gps_lon", "geo_lon"],
-  zone: ["zone", "region", "localite", "commune", "site", "camp", "location_name", "district"],
+  zone: ["zone", "region", "localite", "commune", "site", "camp", "location_name", "district", "fokontany"],
+  enumeratorId: [
+    "enumerator_id",
+    "enumerator",
+    "enqueteur",
+    "enqueteur_id",
+    "agent_id",
+    "agent_terrain",
+    "collector",
+    "interviewer",
+    "submitted_by",
+    "username",
+    "mpanadihady",
+  ],
 };
 
 function cleanKey(k: string): string {
@@ -424,6 +464,7 @@ export function buildNormalizedPair(params: {
     latitude,
     longitude,
     zone: toStringOrNull(mapped.zone),
+    enumeratorId: toStringOrNull(mapped.enumeratorId),
     status: "active",
     extra,
     createdAt: now,

@@ -1,0 +1,56 @@
+{
+  "totalRows": 30,
+  "totalErrors": 10,
+  "errors": [
+    {
+      "externalId": "IMP-021",
+      "errorType": "xss_or_html_injection",
+      "description": "Balise HTML/script injectée dans le nom complet."
+    },
+    {
+      "externalId": "IMP-022",
+      "errorType": "fake_repeated_phone",
+      "description": "Numéro de téléphone factice à chiffres répétés (+221000000000)."
+    },
+    {
+      "externalId": "IMP-023",
+      "errorType": "malformed_email",
+      "description": "Adresse email syntaxiquement invalide (aucune règle email dans le YAML)."
+    },
+    {
+      "externalId": "IMP-024",
+      "errorType": "impossible_calendar_date",
+      "description": "Date calendaire impossible (2026-02-31) ignorée par Date.parse."
+    },
+    {
+      "externalId": "IMP-025",
+      "errorType": "cross_field_minor_high_grant",
+      "description": "Incohérence croisée : bénéficiaire de 5 ans avec un montant de 22 000."
+    },
+    {
+      "externalId": "IMP-026",
+      "errorType": "unsupported_currency",
+      "description": "Devise non reconnue (CRYPTO_XYZ) hors référentiel métier."
+    },
+    {
+      "externalId": "IMP-027",
+      "errorType": "undeclared_intervention_zone",
+      "description": "Zone déclarée inconnue hors référentiel interventionZones du YAML."
+    },
+    {
+      "externalId": "IMP-028",
+      "errorType": "shared_email_across_identities",
+      "description": "Adresse email identique à IMP-001 malgré nom et téléphone distincts."
+    },
+    {
+      "externalId": "IMP-029",
+      "errorType": "numeric_only_name",
+      "description": "Nom complet composé uniquement de chiffres (99887766)."
+    },
+    {
+      "externalId": "IMP-030",
+      "errorType": "test_placeholder_identity",
+      "description": "Saisie de test/factice résiduelle avec montant nul."
+    }
+  ]
+}

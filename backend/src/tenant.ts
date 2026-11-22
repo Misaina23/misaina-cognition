@@ -16,7 +16,7 @@ export class TenantIsolationError extends Error {
   }
 }
 
-const DEFAULT_USERS: AuthPrincipal[] = [
+export const DEFAULT_USERS: AuthPrincipal[] = [
   {
     id: "u-1",
     email: "dir.exec@misaina-corp.org",

@@ -7,7 +7,7 @@
     "build": "./node_modules/.bin/tsc -p backend/tsconfig.json && NODE_ENV=production ./node_modules/.bin/next build frontend",
     "start": "NODE_ENV=production node -e \"const{spawn}=require('node:child_process');const b=spawn(process.execPath,['backend/dist/src/server.js'],{stdio:'inherit',env:{...process.env,PORT:process.env.BACKEND_PORT||'4000'}});const f=spawn('./node_modules/.bin/next',['start','frontend','-p','3000','-H','0.0.0.0'],{stdio:'inherit'});const q=(c=0)=>{try{b.kill('SIGTERM')}catch{}try{f.kill('SIGTERM')}catch{}process.exit(c)};process.on('SIGINT',()=>q(0));process.on('SIGTERM',()=>q(0));b.on('exit',c=>q(c??0));f.on('exit',c=>q(c??0));\"",
     "lint": "./node_modules/.bin/next lint frontend",
-    "test": "tsx backend/tests/evaluate.ts && tsx backend/tests/idempotence.test.ts && tsx backend/tests/isolation.test.ts"
+    "test": "tsx backend/tests/evaluate.ts && tsx backend/tests/idempotence.test.ts && tsx backend/tests/isolation.test.ts && tsx backend/tests/unexpected_eval.test.ts && tsx backend/tests/auth.test.ts && tsx backend/tests/nlq.test.ts && tsx backend/tests/improvements.test.ts && tsx backend/tests/meal_autonomous.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
@@ -21,6 +21,7 @@
     "chokidar": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "docx": "^9.16.0",
     "exceljs": "^4.4.0",
     "js-yaml": "^5.5.0",
     "jschardet": "^4.1.0",

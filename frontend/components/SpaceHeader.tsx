@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, History, LayoutDashboard, ShieldCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, History, LayoutDashboard, LogOut, ShieldCheck } from "lucide-react";
+import { guardianApi } from "@/lib/api";
 
 interface SpaceHeaderProps {
   spaceId: string;
@@ -18,7 +20,13 @@ export function SpaceHeader({
   subtitle,
   actions,
 }: SpaceHeaderProps) {
+  const router = useRouter();
   const encoded = encodeURIComponent(spaceId);
+
+  async function handleLogout() {
+    await guardianApi.logout();
+    router.replace("/login");
+  }
 
   const navItems = [
     {
@@ -60,7 +68,16 @@ export function SpaceHeader({
             <p className="text-xs text-muted-foreground">{subtitle}</p>
           </div>
 
-          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+          <div className="flex flex-wrap items-center gap-2">
+            {actions}
+            <button
+              onClick={() => void handleLogout()}
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+              title="Fermer la session"
+            >
+              <LogOut size={13} /> Déconnexion
+            </button>
+          </div>
         </div>
 
         <nav className="flex flex-wrap items-center gap-2">

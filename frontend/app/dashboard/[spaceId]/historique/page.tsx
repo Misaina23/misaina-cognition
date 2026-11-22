@@ -1,12 +1,13 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Undo2 } from "lucide-react";
 import { SpaceHeader } from "@/components/SpaceHeader";
-import { guardianApi, type AgentAction } from "@/lib/api";
+import { guardianApi, isUnauthorizedError, type AgentAction } from "@/lib/api";
 
 export default function SpaceHistoriquePage() {
+  const router = useRouter();
   const params = useParams<{ spaceId: string }>();
   const spaceId = decodeURIComponent(params.spaceId || "");
 
@@ -21,10 +22,14 @@ export default function SpaceHistoriquePage() {
     try {
       const data = await guardianApi.getActions(spaceId);
       setActions(data.actions || []);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+      }
     } finally {
       setLoading(false);
     }
-  }, [spaceId]);
+  }, [router, spaceId]);
 
   useEffect(() => {
     void refresh();
@@ -37,6 +42,10 @@ export default function SpaceHistoriquePage() {
       await guardianApi.rollbackAction(spaceId, actionId);
       await refresh();
       setBanner("Action annulée : l'état antérieur des enregistrements a été restauré.");
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+      }
     } finally {
       setBusyId(null);
     }

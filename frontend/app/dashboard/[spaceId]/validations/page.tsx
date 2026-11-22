@@ -1,16 +1,23 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 import { SpaceHeader } from "@/components/SpaceHeader";
-import { guardianApi, type ValidationItem } from "@/lib/api";
+import {
+  guardianApi,
+  isUnauthorizedError,
+  type RuleThresholdSuggestion,
+  type ValidationItem,
+} from "@/lib/api";
 
 export default function SpaceValidationsPage() {
+  const router = useRouter();
   const params = useParams<{ spaceId: string }>();
   const spaceId = decodeURIComponent(params.spaceId || "");
 
   const [items, setItems] = useState<ValidationItem[]>([]);
+  const [suggestions, setSuggestions] = useState<RuleThresholdSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
@@ -19,12 +26,22 @@ export default function SpaceValidationsPage() {
     if (!spaceId) return;
     setLoading(true);
     try {
-      const data = await guardianApi.getValidations(spaceId);
-      setItems(data.validations || []);
+      const [valData, fbData] = await Promise.all([
+        guardianApi.getValidations(spaceId),
+        guardianApi.getRuleFeedback(spaceId),
+      ]);
+      setItems(valData.validations || []);
+      setSuggestions(fbData.suggestions || []);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+        return;
+      }
+      setBanner("Accès refusé ou espace introuvable.");
     } finally {
       setLoading(false);
     }
-  }, [spaceId]);
+  }, [router, spaceId]);
 
   useEffect(() => {
     void refresh();
@@ -39,8 +56,12 @@ export default function SpaceValidationsPage() {
       setBanner(
         decision === "approved"
           ? "Proposition validée et appliquée de manière réversible."
-          : "Proposition rejetée ; aucune donnée modifiée."
+          : "Proposition rejetée ; statistique d'apprentissage mise à jour."
       );
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        router.replace("/login");
+      }
     } finally {
       setBusyId(null);
     }
@@ -68,6 +89,30 @@ export default function SpaceValidationsPage() {
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-700">
             {banner}
           </div>
+        )}
+
+        {suggestions.length > 0 && (
+          <section className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-2 text-xs">
+            <div className="flex items-center gap-2 font-semibold text-amber-800">
+              <AlertTriangle size={15} />
+              Apprentissage humain : {suggestions.length} règle(s) rejetée(s) à plus de 60 %
+            </div>
+            {suggestions.map((s) => (
+              <div
+                key={s.ruleId}
+                className="rounded-lg border border-amber-500/30 bg-card/80 p-3 space-y-1"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+                  <span className="font-semibold text-foreground">{s.ruleId}</span>
+                  <span className="text-amber-700">
+                    Rejet : {(s.rejectionRate * 100).toFixed(0)} % ({s.rejectedCount}/{s.totalCount}) · {s.currentSetting}
+                  </span>
+                </div>
+                <p className="text-foreground">{s.suggestedAction}</p>
+                <p className="text-[11px] text-muted-foreground">{s.rationale}</p>
+              </div>
+            ))}
+          </section>
         )}
 
         {loading ? (
