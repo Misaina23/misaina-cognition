@@ -409,12 +409,42 @@ Utilise obligatoirement l'outil query_space_data pour lire les chiffres réels p
       let usedMetric = fallbackParams.metric;
 
       for (let turn = 0; turn < 3; turn++) {
+        const callStartedMs = Date.now();
         const res = await provider.chat({
           system: systemInstruction,
           messages,
           tools: [READ_ONLY_QUERY_TOOL_DECLARATION],
         });
+        const callDurationMs = res.usage.durationMs || Math.max(0, Date.now() - callStartedMs);
         tokensUsed += res.usage.totalTokens;
+
+        journalRepo.addAgentAction(ctx, {
+          id: `act-nlq-${Date.now()}-${turn}-${Math.random().toString(36).slice(2, 6)}`,
+          tenantId: ctx.tenantId,
+          spaceId: ctx.spaceId,
+          runId: "nlq-query",
+          timestamp: new Date().toISOString(),
+          toolName: "llm_chat",
+          inputs: { phase: "nlq_read_only", turn, language: lang },
+          output: {
+            llmProvider: provider.providerName,
+            llmModel: provider.modelName,
+            inputTokens: res.usage.inputTokens,
+            outputTokens: res.usage.outputTokens,
+            totalTokens: res.usage.totalTokens,
+            durationMs: callDurationMs,
+            toolCallsCount: res.toolCalls.length,
+          },
+          decision: `Appel LLM NLQ ${provider.providerName}/${provider.modelName} — ${res.usage.totalTokens} tokens, ${callDurationMs} ms`,
+          confidence: 1,
+          author: "agent",
+          llmProvider: provider.providerName,
+          llmModel: provider.modelName,
+          tokensUsed: res.usage.totalTokens,
+          durationMs: callDurationMs,
+          reversible: false,
+          reverted: false,
+        });
 
         if (res.toolCalls.length > 0) {
           messages.push({ role: "assistant", text: res.text, toolCalls: res.toolCalls });

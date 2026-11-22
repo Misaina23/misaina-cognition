@@ -69,6 +69,8 @@ export interface LlmProvider {
   chat(params: LlmChatParams): Promise<LlmChatResult>;
 }
 
+export type LLMProvider = LlmProvider;
+
 function estimateCostUsd(provider: LlmProviderName, totalTokens: number): number {
   const ratePerMillion =
     provider === "anthropic" ? 0.8 : provider === "openai" ? 0.4 : provider === "gemini" ? 0.15 : 0;

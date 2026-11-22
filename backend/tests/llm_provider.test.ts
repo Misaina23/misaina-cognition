@@ -5,8 +5,10 @@ import { CsvConnector } from "../src/connectors/csv";
 import { journalRepo } from "../src/journal";
 import {
   createLlmProvider,
+  GeminiProvider,
   MockProvider,
   setMockLlmHandler,
+  type LLMProvider,
   type LlmChatParams,
 } from "../src/llm/provider";
 import { createUserSpace, getPrincipalByIdOrHeader, resolveContextForUser } from "../src/tenant";
@@ -27,6 +29,14 @@ async function main() {
     const fallbackProvider = createLlmProvider();
     assert.equal(fallbackProvider.providerName, "deterministic");
     assert.equal(fallbackProvider.modelName, "rules-fallback-v1");
+
+    // 1b. Sélection de GeminiProvider via LLM_PROVIDER=gemini avec GEMINI_API_KEY
+    process.env.LLM_PROVIDER = "gemini";
+    process.env.GEMINI_API_KEY = "test-gemini-key-placeholder";
+    const geminiProvider: LLMProvider = createLlmProvider();
+    assert.ok(geminiProvider instanceof GeminiProvider);
+    assert.equal(geminiProvider.providerName, "gemini");
+    delete process.env.GEMINI_API_KEY;
 
     // 2. Sélection par LLM_PROVIDER=mock + vérification chat({ system, messages, tools, schema })
     const observedCalls: LlmChatParams[] = [];
@@ -168,6 +178,13 @@ async function main() {
     const nlqRes = await askNaturalLanguageSpaceQuestion(ctx, "Combien d'enregistrements actifs ?");
     assert.equal(nlqRes.llmProvider, "mock");
     assert.equal(nlqRes.tokensUsed, 225);
+
+    const nlqActions = journalRepo
+      .listAgentActions(ctx, "nlq-query")
+      .filter((a) => a.toolName === "llm_chat");
+    assert.equal(nlqActions.length, 2);
+    assert.equal(nlqActions[0].llmProvider, "mock");
+    assert.ok((nlqActions[0].tokensUsed || 0) > 0);
 
     // 4. Vérifier que MockProvider direct fonctionne avec chat({ system, messages, tools, schema })
     const directMock = new MockProvider(() => ({
