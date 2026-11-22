@@ -1,0 +1,11 @@
+{
+  "reason": "blocking_anomalies",
+  "count": 1,
+  "anomalies": [
+    {
+      "id": "anom-run-1795344703165-24k4-1",
+      "recordId": "rec-src-space-1795344702967-0c47-csv-1795344702968-be2a8ce03c0e-1795344703129-1",
+      "ruleId": "exact_duplicate_business_key"
+    }
+  ]
+}

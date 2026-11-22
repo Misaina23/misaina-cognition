@@ -62,10 +62,14 @@ export function getPgPool(): Pool | null {
   const url = readDatabaseUrl();
   if (!url) return null;
   if (!pgPool) {
+    const pgSslEnv = process.env.PGSSL?.trim().toLowerCase();
     const needsSsl =
-      process.env.PGSSL === "true" ||
-      url.includes("render.com") ||
-      url.includes("sslmode=require");
+      pgSslEnv === "false" || pgSslEnv === "0"
+        ? false
+        : pgSslEnv === "true" ||
+          pgSslEnv === "1" ||
+          url.includes("render.com") ||
+          url.includes("sslmode=require");
     pgPool = new Pool({
       connectionString: url,
       max: 10,

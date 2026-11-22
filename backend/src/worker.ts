@@ -8,7 +8,7 @@ import { CsvConnector } from "./connectors/csv";
 import { ExcelConnector } from "./connectors/excel";
 import { GenericConnector } from "./connectors/generic";
 import type { DataRun, TenantSpaceContext } from "./connectors/types";
-import { ensureSpaceDirectories, journalRepo, moveInboxFile } from "./journal";
+import { ensureSpaceDirectories, getInboxBaseDir, journalRepo, moveInboxFile } from "./journal";
 import { tenantSpacesRegistry } from "./tenant";
 
 let cronTask: ScheduledTask | undefined;
@@ -17,9 +17,7 @@ let inboxWatcher: FSWatcher | undefined;
 const processingFiles = new Set<string>();
 
 function getInboxRoot(): string {
-  const cwd = process.cwd();
-  const base = fs.existsSync(path.join(cwd, "config", "projects")) ? cwd : path.join(cwd, "backend");
-  return path.join(base, "data", "inbox");
+  return getInboxBaseDir();
 }
 
 export function runNightlyCheckAllSpaces(): {
@@ -143,8 +141,10 @@ export async function processInboxFilePath(filePath: string): Promise<boolean> {
  */
 export function startWorker() {
   if (!cronTask) {
+    const rawSchedule = process.env.CRON_SCHEDULE?.trim() || "0 2 * * *";
+    const nightlySchedule = cron.validate(rawSchedule) ? rawSchedule : "0 2 * * *";
     cronTask = cron.schedule(
-      "0 2 * * *",
+      nightlySchedule,
       () => {
         void journalRepo.ensureReady().then(() => {
           runNightlyCheckAllSpaces();

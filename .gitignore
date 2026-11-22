@@ -2,6 +2,10 @@ node_modules/
 .next/
 out/
 *.log
+.env
+.env*.local
+backend/.env
+backend/.env*.local
 bin/
 obj/
 .vs/

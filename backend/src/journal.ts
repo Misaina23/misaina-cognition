@@ -188,6 +188,25 @@ function persistStateToDisk(): void {
   }
 }
 
+let cachedInboxBaseDir: string | undefined;
+
+export function getInboxBaseDir(): string {
+  const defaultDir = path.join(getBackendRoot(), "data", "inbox");
+  const configured = process.env.INBOX_DIR?.trim();
+  if (!configured) return defaultDir;
+  if (cachedInboxBaseDir && cachedInboxBaseDir === configured) return configured;
+
+  try {
+    fs.mkdirSync(configured, { recursive: true });
+    fs.accessSync(configured, fs.constants.W_OK);
+    cachedInboxBaseDir = configured;
+    return configured;
+  } catch (err) {
+    console.warn(`INBOX_DIR (${configured}) non accessible, repli vers ${defaultDir}:`, err);
+    return defaultDir;
+  }
+}
+
 export function getSpaceDiskDirs(ctx: TenantSpaceContext): {
   inboxDir: string;
   archiveDir: string;
@@ -197,7 +216,7 @@ export function getSpaceDiskDirs(ctx: TenantSpaceContext): {
   const t = safeSeg(ctx.tenantId);
   const s = safeSeg(ctx.spaceId);
   return {
-    inboxDir: path.join(base, "inbox", t, s),
+    inboxDir: path.join(getInboxBaseDir(), t, s),
     archiveDir: path.join(base, "archive", t, s),
     quarantineDir: path.join(base, "quarantine", t, s),
   };

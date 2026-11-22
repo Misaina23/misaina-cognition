@@ -1,4 +1,5 @@
 import http from "node:http";
+import { journalRepo } from "./journal";
 import { createLlmProvider } from "./llm/provider";
 import { checkPgHealth, closePgPool } from "./pgStore";
 import { handleActionsRoute } from "./routes/actions";
@@ -8,14 +9,41 @@ import { handleSourcesRoute, sendJson } from "./routes/sources";
 import { startWorker, stopWorker } from "./worker";
 
 const PORT = Number(process.env.BACKEND_PORT || process.env.PORT || 4000);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
+
+function normalizeOrigin(origin: string): string {
+  return origin.trim().replace(/\/+$/, "");
+}
+
+function getAllowedCorsOrigins(): string[] {
+  const raw = [process.env.CORS_ORIGIN, process.env.FRONTEND_URL]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .join(",");
+  const parsed = raw
+    .split(",")
+    .map(normalizeOrigin)
+    .filter(Boolean);
+  return parsed.length > 0 ? Array.from(new Set(parsed)) : ["http://localhost:3000"];
+}
 
 export function createGuardianServer() {
   return http.createServer(async (req, res) => {
+    const allowedOrigins = getAllowedCorsOrigins();
     const requestOrigin = req.headers.origin;
-    res.setHeader("Access-Control-Allow-Origin", requestOrigin || CORS_ORIGIN);
+    const normalizedRequestOrigin = requestOrigin ? normalizeOrigin(requestOrigin) : "";
+    const allowOrigin =
+      allowedOrigins.includes("*")
+        ? "*"
+        : normalizedRequestOrigin && allowedOrigins.includes(normalizedRequestOrigin)
+          ? requestOrigin!
+          : normalizedRequestOrigin && allowedOrigins.includes("http://localhost:3000")
+            ? requestOrigin!
+            : allowedOrigins[0];
+
+    res.setHeader("Access-Control-Allow-Origin", allowOrigin);
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    if (allowOrigin !== "*") {
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
 
@@ -63,8 +91,16 @@ export function createGuardianServer() {
 }
 
 if (require.main === module) {
-  startWorker();
   const server = createGuardianServer();
+  void journalRepo
+    .ensureReady()
+    .catch((err) => {
+      console.error("Erreur hydratation initiale du journal :", err);
+    })
+    .finally(() => {
+      startWorker();
+    });
+
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Backend Gardien de données démarré sur http://0.0.0.0:${PORT}`);
   });

@@ -1,19 +1,17 @@
 import type { TenantSpaceContext } from "../connectors/types";
 import { journalRepo } from "../journal";
 import { sendEmailSummary } from "./email";
-import { sendTelegramSummary } from "./telegram";
 
 export interface NotificationResult {
   channels: string[];
-  telegramSent: boolean;
   emailSent: boolean;
+  emailProvider?: "resend" | "smtp";
+  recipient?: string;
 }
 
 /**
- * Diffuse le résumé de fin de run dans l'ordre validé :
- * 1) Fallback journalisation dans agent_actions + aperçu UI
- * 2) Telegram Bot si TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID existent
- * 3) Email SMTP via nodemailer si configuré
+ * Diffuse le résumé de fin de run par Email (Resend prioritaire, repli SMTP Gmail/nodemailer)
+ * en plus de la journalisation dans agent_actions et de l'aperçu UI.
  */
 export async function dispatchRunSummaryNotification(
   ctx: TenantSpaceContext,
@@ -21,21 +19,16 @@ export async function dispatchRunSummaryNotification(
   summaryText: string
 ): Promise<NotificationResult> {
   const channels = ["ui_preview", "agent_actions"];
-  let telegramSent = false;
   let emailSent = false;
+  let emailProvider: "resend" | "smtp" | undefined;
+  let recipient: string | undefined;
 
   try {
-    if (await sendTelegramSummary(summaryText)) {
-      telegramSent = true;
-      channels.push("telegram");
-    }
-  } catch (err) {
-    console.warn("Notification Telegram échouée:", err);
-  }
-
-  try {
-    if (await sendEmailSummary(runId, summaryText)) {
+    const emailRes = await sendEmailSummary(runId, summaryText);
+    if (emailRes.sent) {
       emailSent = true;
+      emailProvider = emailRes.provider;
+      recipient = emailRes.recipient;
       channels.push("email");
     }
   } catch (err) {
@@ -50,7 +43,13 @@ export async function dispatchRunSummaryNotification(
     timestamp: new Date().toISOString(),
     toolName: "notify_run_summary",
     inputs: { runId },
-    output: { channels, telegramSent, emailSent, summaryPreview: summaryText },
+    output: {
+      channels,
+      emailSent,
+      emailProvider: emailProvider ?? null,
+      recipient: recipient ?? null,
+      summaryPreview: summaryText,
+    },
     decision: `Résumé diffusé (${channels.join(", ")})`,
     confidence: 1,
     author: "agent",
@@ -58,5 +57,5 @@ export async function dispatchRunSummaryNotification(
     reverted: false,
   });
 
-  return { channels, telegramSent, emailSent };
+  return { channels, emailSent, emailProvider, recipient };
 }

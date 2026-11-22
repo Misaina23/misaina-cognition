@@ -584,6 +584,7 @@ export function createLlmProvider(override?: {
     .trim()
     .toLowerCase() as LlmProviderName | "";
   const model = (override?.model || process.env.LLM_MODEL || "").trim() || undefined;
+  const geminiModel = model || process.env.GEMINI_MODEL?.trim() || undefined;
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const openaiKey = process.env.OPENAI_API_KEY?.trim();
   const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
@@ -603,11 +604,11 @@ export function createLlmProvider(override?: {
     return new AnthropicProvider(anthropicKey, model);
   }
   if (requested === "gemini" && geminiKey) {
-    return new GeminiProvider(geminiKey, model);
+    return new GeminiProvider(geminiKey, geminiModel);
   }
 
   if (!requested) {
-    if (geminiKey) return new GeminiProvider(geminiKey, model);
+    if (geminiKey) return new GeminiProvider(geminiKey, geminiModel);
     if (openaiKey) {
       return new OpenAiCompatibleProvider(
         openaiKey,

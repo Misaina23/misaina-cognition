@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "db:init": "node dist/src/initDb.js",
     "start": "node dist/src/server.js",
-    "test": "tsx tests/evaluate.ts && tsx tests/idempotence.test.ts && tsx tests/isolation.test.ts && tsx tests/unexpected_eval.test.ts && tsx tests/auth.test.ts && tsx tests/nlq.test.ts && tsx tests/improvements.test.ts && tsx tests/meal_autonomous.test.ts && tsx tests/llm_provider.test.ts",
+    "start:sh": "sh ./start.sh",
+    "test": "tsx tests/evaluate.ts && tsx tests/idempotence.test.ts && tsx tests/isolation.test.ts && tsx tests/unexpected_eval.test.ts && tsx tests/auth.test.ts && tsx tests/nlq.test.ts && tsx tests/improvements.test.ts && tsx tests/meal_autonomous.test.ts && tsx tests/llm_provider.test.ts && tsx tests/notify_email.test.ts",
     "evaluate": "node dist/tests/evaluate.js",
     "test:idempotence": "node dist/tests/idempotence.test.js",
     "test:isolation": "node dist/tests/isolation.test.js"

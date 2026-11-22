@@ -1,0 +1,16 @@
+{
+  "reason": "blocking_anomalies",
+  "count": 2,
+  "anomalies": [
+    {
+      "id": "anom-run-1795344711826-w9ia-1",
+      "recordId": "rec-src-space-1795344711611-u5de-csv-1795344711612-7da639ffaf7b-1795344711788-2",
+      "ruleId": "range_age"
+    },
+    {
+      "id": "anom-run-1795344711826-w9ia-2",
+      "recordId": "rec-src-space-1795344711611-u5de-csv-1795344711612-afadd975acb6-1795344711787-1",
+      "ruleId": "exact_duplicate_business_key"
+    }
+  ]
+}
