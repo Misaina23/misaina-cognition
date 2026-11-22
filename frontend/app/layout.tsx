@@ -16,13 +16,13 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Misaina Cognition — Moteur de Connaissance Souverain & Gouvernance RAG",
+  title: "Misaina Cognition — Données documentaires et collecte terrain",
   description:
-    "Plateforme d'intelligence documentaire, gouvernance RAG hybride BM25 et vecteurs denses, traçabilité cryptographique et isolation multitenant SecNumCloud et PSSI.",
+    "Centralisez vos documents, recherchez vos sources et contrôlez la qualité des données terrain avec traçabilité et validation humaine.",
   openGraph: {
-    title: "Misaina Cognition — Moteur de Connaissance Souverain & Gouvernance RAG",
+    title: "Misaina Cognition — Données documentaires et collecte terrain",
     description:
-      "Fédérez les silos documentaires de votre groupe dans un pipeline certifié BM25 et vecteurs denses avec traçabilité cryptographique des citations.",
+      "Une plateforme pour centraliser les connaissances, fiabiliser les collectes terrain et conserver une piste d'audit vérifiable.",
   },
 };
 

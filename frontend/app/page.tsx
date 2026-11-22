@@ -36,8 +36,8 @@ interface ShowcaseScenario {
 const SCENARIOS: ShowcaseScenario[] = [
   {
     id: "secnumcloud",
-    label: "SecNumCloud & PSSI",
-    question: "Comment l'isolation inter-filiales est-elle garantie dans les index vectoriels ?",
+    label: "Cloisonnement & PSSI",
+    question: "Comment les périmètres entre directions sont-ils séparés dans les données indexées ?",
     classification: "CONFIDENTIEL",
     bm25Score: "4.8210",
     vectorScore: "0.9412",
@@ -48,7 +48,7 @@ const SCENARIOS: ShowcaseScenario[] = [
     excerpt:
       "Toutes les données documentaires, index vectoriels et journaux d'audit sont cloisonnés par tenantId et spaceId. Aucune donnée d'une filiale n'est mutualisée.",
     answer:
-      "Le cloisonnement logique strict (tenantId / spaceId) s'applique en amont de chaque calcul BM25 et vectoriel. Toute requête inter-tenant lève une erreur d'isolation 403 journalisée dans la chaîne d'audit SHA-256.",
+      "Le périmètre tenantId / spaceId est appliqué avant chaque recherche. Une requête hors périmètre est refusée et les opérations sensibles sont consignées dans le journal d'audit.",
   },
   {
     id: "hybrid-rag",
@@ -62,7 +62,7 @@ const SCENARIOS: ShowcaseScenario[] = [
     page: 7,
     sha256Prefix: "4b71e90c33d8a2f1907c5521ab94e21d",
     excerpt:
-      "Le moteur lexical BM25 (k1=1.5, b=0.75) garantit la correspondance exacte des acronymes et références, fusionnée par RRF avec la projection vectorielle dense.",
+      "Le moteur lexical BM25 (k1=1.5, b=0.75) recherche les acronymes et références exactes, puis les associe à une projection vectorielle dense avant classement par RRF.",
     answer:
       "Les deux moteurs opèrent en parallèle sur les fragments autorisés : BM25 capte la précision lexicale exacte tandis que la similarité cosinus modélise le sens. La fusion Reciprocal Rank Fusion (RRF) classe les preuves avant génération.",
   },
@@ -80,7 +80,7 @@ const SCENARIOS: ShowcaseScenario[] = [
     excerpt:
       "Tout écart GPS hors périmètre (> 25 km), doublon E.164 ou saisie copier-coller répétitive par un même enquêteur déclenche une file de validation humaine.",
     answer:
-      "Le moteur autonome vérifie les coordonnées GPS, normalise les téléphones E.164, détecte les doublons flous et isole les anomalies dans une file de validation réversible avec export hebdomadaire .docx.",
+      "Le pipeline vérifie les coordonnées GPS, normalise les téléphones, détecte les doublons probables et classe les anomalies dans une file de validation réversible avec export hebdomadaire .docx.",
   },
 ];
 
@@ -234,12 +234,12 @@ export default function ShowcaseLandingPage() {
                       textWrap: "balance",
                     }}
                   >
-                    Le Moteur de Connaissance Souverain Dédié aux Grandes Organisations
+                    Une plateforme pour maîtriser vos données documentaires et terrain
                   </h1>
                   <p className="text-base text-muted-foreground leading-relaxed max-w-xl">
-                    Fédérez les silos documentaires de votre groupe dans un pipeline certifié BM25
-                    et vecteurs denses. Bénéficiez d&apos;une traçabilité cryptographique des
-                    citations et d&apos;une isolation multitenant conforme SecNumCloud et PSSI.
+                    Centralisez vos documents, recherchez avec précision, traitez vos collectes
+                    terrain et conservez une piste d&apos;audit vérifiable. Chaque réponse reste
+                    reliée à ses sources et à son périmètre d&apos;accès.
                   </p>
                 </div>
 
@@ -288,7 +288,7 @@ export default function ShowcaseLandingPage() {
                         Déploiement Souverain Multi-Entités
                       </p>
                       <p className="text-slate-300">
-                        Qualification SecNumCloud · Chiffrement JWT HS256 · Zéro fuite inter-tenant
+                        Déploiement maîtrisé · Accès par rôle · Périmètres cloisonnés
                       </p>
                     </div>
                   </div>
@@ -304,7 +304,7 @@ export default function ShowcaseLandingPage() {
                   BM25 + RRF
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Fusion lexicale et vectorielle 128 dimensions
+                  Recherche hybride lexicale et vectorielle
                 </p>
               </div>
               <div className="rounded-xl border border-border bg-card p-5 space-y-1">
@@ -319,7 +319,7 @@ export default function ShowcaseLandingPage() {
               <div className="rounded-xl border border-border bg-card p-5 space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">Cloisonnement logique</p>
                 <p className="text-2xl font-bold font-mono tabular-nums text-foreground">
-                  100 % Isolé
+                  Par tenant
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Index, règles YAML et journaux dédiés par tenant
@@ -348,11 +348,11 @@ export default function ShowcaseLandingPage() {
               className="text-2xl md:text-3xl font-bold tracking-tight text-foreground"
               style={{ textWrap: "balance" }}
             >
-              Conçu pour les exigences des DSI, RSSI et directions opérationnelles
+              Conçu pour les équipes opérations, DSI et RSSI
             </h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Misaina Cognition réunit l&apos;intelligence documentaire souveraine (RAG hybride
-              certifié) et le contrôle qualité autonome des flux de données terrain.
+              Misaina Cognition relie la recherche documentaire vérifiable au contrôle qualité
+              des données terrain, dans des espaces accessibles et séparés par organisation.
             </p>
           </div>
 
@@ -361,15 +361,14 @@ export default function ShowcaseLandingPage() {
             <div className="lg:col-span-7 rounded-2xl border border-border bg-card p-7 space-y-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-foreground">
-                  01. Pipeline Hybride BM25 &amp; Vecteurs Denses
+                  01. Recherche documentaire hybride
                 </h3>
                 <Search size={18} className="text-primary shrink-0" />
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Les moteurs purement vectoriels échouent sur les références exactes, numéros
-                d&apos;articles, acronymes internes et codes réglementaires. Notre pipeline exécute
-                conjointement un score lexical BM25 calibré (k1=1.5, b=0.75) et une similarité
-                cosinus sur vecteurs denses, unifiés par Reciprocal Rank Fusion (RRF).
+                Les recherches doivent retrouver à la fois les termes exacts et le sens général.
+                Misaina combine un classement lexical BM25 avec une recherche vectorielle locale,
+                puis fusionne les résultats à l&apos;aide de Reciprocal Rank Fusion (RRF).
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-border pt-5 text-xs">
                 <div>
@@ -403,18 +402,17 @@ export default function ShowcaseLandingPage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-foreground">
-                      02. Isolation Multitenant SecNumCloud
+                      02. Espaces cloisonnés
                     </h3>
                     <Lock size={18} className="text-primary shrink-0" />
                   </div>
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    Chaque filiale ou direction opère dans un périmètre strictement cloisonné.
-                    Toute tentative d&apos;accès croisé est bloquée côté serveur (HTTP 403) et
-                    tracée.
+                    Chaque filiale ou direction opère dans un périmètre distinct. Les accès sont
+                    contrôlés côté serveur selon l&apos;utilisateur, ses droits et l&apos;espace consulté.
                   </p>
                 </div>
                 <p className="text-xs font-mono text-muted-foreground pt-3 border-t border-border">
-                  JwtClaims HS256 · Cookies HttpOnly · Zéro index partagé
+                  Accès par rôle · Sessions authentifiées · Index dédiés
                 </p>
               </div>
             </div>
@@ -423,14 +421,14 @@ export default function ShowcaseLandingPage() {
             <div className="lg:col-span-5 rounded-2xl border border-border bg-card p-7 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-foreground">
-                  03. Traçabilité Cryptographique des Citations
+                  03. Citations vérifiables
                 </h3>
                 <Fingerprint size={18} className="text-primary shrink-0" />
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Chaque fragment indexé est scellé par empreinte SHA-256 et lié à un arbre de
-                Merkle. Lors d&apos;une réponse, chaque citation génère un reçu HMAC-SHA256
-                vérifiable mathématiquement en un clic par vos auditeurs ou votre RSSI.
+                Chaque fragment indexé porte une empreinte cryptographique. Une réponse conserve
+                ses sources, son emplacement documentaire et la preuve associée pour faciliter
+                la revue par les auditeurs ou les responsables métier.
               </p>
               <div className="rounded-lg border border-border bg-muted/50 p-3 font-mono text-[11px] text-muted-foreground space-y-1">
                 <div>Algorithme : SHA-256 + HMAC-SHA256</div>
@@ -442,15 +440,14 @@ export default function ShowcaseLandingPage() {
             <div className="lg:col-span-7 rounded-2xl border border-border bg-card p-7 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-foreground">
-                  04. Contrôle Qualité Autonome &amp; Agent MEAL Intégré
+                  04. Contrôle qualité des données terrain
                 </h3>
                 <Database size={18} className="text-primary shrink-0" />
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                En complément du moteur de connaissance, vos équipes opérations disposent d&apos;un
-                pipeline autonome pour ingérer les collectes CSV, Excel, CommCare, Kobo et ODK,
-                détecter les écarts GPS/zone, dédupliquer sans suppression physique et exporter des
-                rapports hebdomadaires certifiés au format Word (.docx).
+                Vos équipes opérations peuvent importer des collectes CSV, Excel, CommCare, Kobo
+                ou ODK, détecter les écarts GPS et les doublons, puis soumettre les anomalies à
+                une validation humaine avant l&apos;export de rapports Word (.docx).
               </p>
               <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground border-t border-border pt-4">
                 <span>Idempotence SHA-256</span>
@@ -602,7 +599,7 @@ export default function ShowcaseLandingPage() {
                 Conformité &amp; Auditabilité
               </p>
               <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-                Conçu pour passer les homologations RSSI les plus strictes
+                Pensé pour les revues DSI, RSSI et métier
               </h2>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 Chaque opération — ingestion, recherche RAG, vérification de preuve, décision de
@@ -615,11 +612,11 @@ export default function ShowcaseLandingPage() {
               <div className="rounded-xl border border-border bg-card p-5 space-y-2">
                 <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <Server size={16} className="text-primary" />
-                  Conformité SecNumCloud
+                  Hébergement à choisir
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Déploiement compatible cloud qualifié SecNumCloud ou infrastructure On-Premise
-                  déconnectée avec repli déterministe sans dépendance LLM externe.
+                  Les déploiements peuvent être envisagés en cloud souverain, On-Premise ou
+                  hybride selon les exigences de l&apos;organisation et leur validation technique.
                 </p>
               </div>
 
@@ -637,11 +634,11 @@ export default function ShowcaseLandingPage() {
               <div className="rounded-xl border border-border bg-card p-5 space-y-2">
                 <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <FileCheck2 size={16} className="text-primary" />
-                  Chaîne d&apos;Audit Immuable
+                  Chaîne d&apos;audit vérifiable
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   Chaque événement référence le condensat SHA-256 de l&apos;événement précédent,
-                  garantissant la détection immédiate de toute altération du journal.
+                  ce qui permet de détecter une rupture dans la chaîne lors de la vérification.
                 </p>
               </div>
 
@@ -754,7 +751,7 @@ export default function ShowcaseLandingPage() {
                     }
                     className="w-full rounded-lg border border-border bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
                   >
-                    <option value="SecNumCloud">Cloud qualifié SecNumCloud</option>
+                    <option value="SecNumCloud">Cloud souverain / SecNumCloud</option>
                     <option value="On-Premise">On-Premise / Air-Gapped</option>
                     <option value="Hybride">Hybride multi-filiales</option>
                   </select>
@@ -828,7 +825,7 @@ export default function ShowcaseLandingPage() {
               Pipeline RAG
             </a>
             <a href="#conformite" className="hover:text-foreground transition-colors">
-              SecNumCloud &amp; PSSI
+              Gouvernance &amp; audit
             </a>
             <Link
               href={sessionUser ? "/workspace" : "/login"}

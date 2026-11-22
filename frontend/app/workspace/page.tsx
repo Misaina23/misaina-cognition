@@ -82,7 +82,7 @@ function WorkspaceHubContent() {
                 Misaina Cognition — Espaces Souverains
               </h1>
               <p className="text-xs text-muted-foreground">
-                Cloisonnement multitenant SecNumCloud · Moteur RAG BM25 &amp; Contrôle Qualité MEAL
+                Espaces cloisonnés · Recherche documentaire · Contrôle qualité MEAL
               </p>
             </div>
           </div>
@@ -225,7 +225,7 @@ function WorkspaceHubContent() {
                       {space.name}
                     </h3>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      {space.description || "Périmètre multitenant cloisonné SecNumCloud et PSSI."}
+                      {space.description || "Périmètre documentaire et opérationnel cloisonné."}
                     </p>
                   </div>
 
