@@ -14,7 +14,12 @@ import {
   updateSpaceAlertSettings,
 } from "../notify/index";
 import { generateWeeklySpaceDocxBuffer } from "../reports/weeklyDocx";
-import { deriveTenantId, listAuthorizedSpaces, TenantIsolationError } from "../tenant";
+import {
+  deriveTenantId,
+  listAuthorizedSpaces,
+  requirePermission,
+  TenantIsolationError,
+} from "../tenant";
 import { pollApiSourcesAllSpaces, processInboxFilePath, runNightlyCheckAllSpaces } from "../worker";
 import { readJsonBody, resolveHttpContext, sendJson } from "./sources";
 
@@ -47,7 +52,8 @@ export async function handleRunsRoute(
     await journalRepo.ensureReady();
 
     if (url.pathname === "/api/rules/feedback" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:read");
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,
@@ -58,13 +64,15 @@ export async function handleRunsRoute(
 
     if (url.pathname === "/api/rules") {
       if (req.method === "GET") {
-        const { ctx } = resolveHttpContext(req, url);
+        const { user, ctx } = resolveHttpContext(req, url);
+        requirePermission(user, "meal:read");
         const rules = journalRepo.getProjectRules(ctx);
         return sendJson(res, 200, { tenantId: ctx.tenantId, spaceId: ctx.spaceId, ...rules });
       }
       if (req.method === "PUT") {
         const body = (await readJsonBody(req)) as { spaceId?: string; yaml?: string };
-        const { ctx } = resolveHttpContext(req, url, body.spaceId);
+        const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+        requirePermission(user, "rules:edit");
         const saved = journalRepo.setProjectRulesYaml(ctx, body.yaml || "");
         await journalRepo.flushPg();
         return sendJson(res, 200, { tenantId: ctx.tenantId, spaceId: ctx.spaceId, ...saved });
@@ -72,7 +80,8 @@ export async function handleRunsRoute(
     }
 
     if (url.pathname === "/api/records/export" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:export");
       const includeFlagged = url.searchParams.get("includeFlagged") === "true";
       const activeRecords = journalRepo.listNormalizedRecords(ctx, { includeArchived: false });
       const openAnomalies = journalRepo.listAnomalies(ctx, { status: "open" });
@@ -133,7 +142,8 @@ export async function handleRunsRoute(
     }
 
     if (url.pathname === "/api/records" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:read");
       const includeArchived = url.searchParams.get("includeArchived") === "true";
       const records = journalRepo.listNormalizedRecords(ctx, { includeArchived });
       return sendJson(res, 200, { tenantId: ctx.tenantId, spaceId: ctx.spaceId, records });
@@ -147,7 +157,8 @@ export async function handleRunsRoute(
           notifyOnEveryRun: z.boolean().optional(),
         })
         .parse(await readJsonBody(req));
-      const { ctx } = resolveHttpContext(req, url, body.spaceId);
+      const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "rules:edit");
       const updated = updateSpaceAlertSettings(ctx, {
         alertEmail: body.alertEmail,
         notifyOnEveryRun: body.notifyOnEveryRun,
@@ -156,14 +167,16 @@ export async function handleRunsRoute(
     }
 
     if (url.pathname === "/api/evaluation/unexpected" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:read");
       const { config: rules } = journalRepo.getProjectRules(ctx);
       const report = await runUnexpectedCasesEvaluation(rules);
       return sendJson(res, 200, report);
     }
 
     if (url.pathname === "/api/reports/weekly" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:export");
       const { buffer, fileName } = await generateWeeklySpaceDocxBuffer(ctx);
       res.writeHead(200, {
         "Content-Type":
@@ -177,14 +190,16 @@ export async function handleRunsRoute(
 
     if (url.pathname === "/api/query" && req.method === "POST") {
       const body = NlqBodySchema.parse(await readJsonBody(req));
-      const { ctx } = resolveHttpContext(req, url, body.spaceId);
+      const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "meal:read");
       const result = await askNaturalLanguageSpaceQuestion(ctx, body.question);
       await journalRepo.flushPg();
       return sendJson(res, 200, result);
     }
 
     if (req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:read");
       const spaceRecords = journalRepo.listNormalizedRecords(ctx, { includeArchived: true });
       const activeRecords = spaceRecords.filter((r) => r.status === "active");
       const spaceAnomalies = journalRepo.listAnomalies(ctx);
@@ -296,9 +311,9 @@ export async function handleRunsRoute(
       const body = TriggerRunSchema.parse(await readJsonBody(req));
       if (body.mode === "nightly") {
         const { user } = resolveHttpContext(req, url, body.spaceId);
-        const tenantId = deriveTenantId(user.department);
+        requirePermission(user, "meal:run_agent");
         const authorizedContexts = listAuthorizedSpaces(user).map((s) => ({
-          tenantId,
+          tenantId: s.tenantId,
           spaceId: s.id,
           userId: user.id,
         }));
@@ -308,16 +323,17 @@ export async function handleRunsRoute(
       }
       if (body.mode === "autonomous_sync") {
         const { user } = resolveHttpContext(req, url, body.spaceId);
-        const tenantId = deriveTenantId(user.department);
+        requirePermission(user, "meal:run_agent");
         const authorizedContexts = listAuthorizedSpaces(user).map((s) => ({
-          tenantId,
+          tenantId: s.tenantId,
           spaceId: s.id,
           userId: user.id,
         }));
         const pollSummary = await pollApiSourcesAllSpaces(authorizedContexts);
         return sendJson(res, 200, pollSummary);
       }
-      const { ctx } = resolveHttpContext(req, url, body.spaceId);
+      const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "meal:run_agent");
 
       if (body.mode === "demo_kobo_ingest") {
         const src = journalRepo.ensureSourceForType(ctx, "generic", "Export CommCare / Kobo Anonymisé", {

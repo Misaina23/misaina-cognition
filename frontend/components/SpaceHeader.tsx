@@ -2,7 +2,7 @@
 
 interface SpaceHeaderProps {
   spaceId: string;
-  activeSection: "overview" | "knowledge" | "validations" | "historique";
+  activeSection: "overview" | "knowledge" | "validations" | "historique" | "users";
   title: string;
   subtitle: string;
   actions?: React.ReactNode;

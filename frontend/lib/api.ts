@@ -58,12 +58,51 @@ api.interceptors.response.use(
   }
 );
 
+export type Permission =
+  | "meal:read"
+  | "meal:export"
+  | "meal:run_agent"
+  | "meal:ingest"
+  | "meal:validate"
+  | "meal:rollback"
+  | "rules:edit"
+  | "knowledge:read"
+  | "knowledge:write"
+  | "spaces:create"
+  | "users:manage";
+
+export type AccountStatus = "active" | "pending" | "suspended" | "rejected";
+export type UserRole =
+  | "SUPER_ADMIN"
+  | "ADMIN"
+  | "COORDINATEUR"
+  | "ANALYSTE"
+  | "LECTEUR"
+  | "USER";
+
 export interface AuthUser {
   id: string;
   email: string;
   fullName: string;
-  role: string;
+  role: UserRole | string;
   department: string;
+  status?: AccountStatus;
+  permissions?: Permission[];
+  createdAt?: string;
+  validatedBy?: string;
+  validatedAt?: string;
+}
+
+export interface PermissionOption {
+  code: Permission;
+  label: string;
+}
+
+export interface UsersDirectoryResponse {
+  users: AuthUser[];
+  spaces: UserSpace[];
+  availablePermissions: PermissionOption[];
+  rolePresets: Record<string, Permission[]>;
 }
 
 export interface UserSpace {
@@ -292,6 +331,21 @@ export const guardianApi = {
         if (r.data?.token) setStoredToken(r.data.token);
         return r.data;
       }),
+  register: (payload: {
+    fullName: string;
+    email: string;
+    password: string;
+    department: string;
+    requestedRole?: "COORDINATEUR" | "ANALYSTE" | "LECTEUR";
+  }) =>
+    api
+      .post<{
+        registered: boolean;
+        status: AccountStatus;
+        message: string;
+        user: AuthUser;
+      }>("/auth/register", payload)
+      .then((r) => r.data),
   logout: () =>
     api
       .post<{ loggedOut: boolean }>("/auth/logout")
@@ -300,6 +354,31 @@ export const guardianApi = {
         setStoredToken(null);
       }),
   me: () => api.get<{ user: AuthUser; spaces: UserSpace[] }>("/auth/me").then((r) => r.data),
+
+  getUsers: () => api.get<UsersDirectoryResponse>("/users").then((r) => r.data),
+  createUserByAdmin: (payload: {
+    fullName: string;
+    email: string;
+    password: string;
+    department: string;
+    role: UserRole;
+    permissions?: Permission[];
+    spaceIds?: string[];
+  }) => api.post<{ user: AuthUser }>("/users", payload).then((r) => r.data),
+  approveUser: (payload: {
+    userId: string;
+    decision: "approve" | "reject";
+    role?: UserRole;
+    permissions?: Permission[];
+    spaceIds?: string[];
+  }) => api.post<{ user: AuthUser }>("/users/approve", payload).then((r) => r.data),
+  updateUserPermissions: (payload: {
+    userId: string;
+    role?: UserRole;
+    permissions?: Permission[];
+    status?: "active" | "suspended";
+    spaceIds?: string[];
+  }) => api.put<{ user: AuthUser }>("/users/permissions", payload).then((r) => r.data),
 
   getSpaces: () => api.get<{ spaces: UserSpace[] }>("/spaces").then((r) => r.data),
   createSpace: (name: string, description = "") =>

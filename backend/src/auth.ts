@@ -2,7 +2,19 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
-import { DEFAULT_USERS, type AuthPrincipal } from "./tenant";
+import {
+  ALL_PERMISSIONS,
+  createUserSpace,
+  DEFAULT_USERS,
+  deriveTenantId,
+  ROLE_PERMISSION_PRESETS,
+  tenantSpacesRegistry,
+  TenantIsolationError,
+  usersRegistry,
+  type AuthPrincipal,
+  type Permission,
+  type UserRole,
+} from "./tenant";
 
 export const SESSION_COOKIE_NAME = "gardien_session";
 export const SESSION_TTL_SECONDS = 86400; // 24h
@@ -15,13 +27,111 @@ export class AuthUnauthorizedError extends Error {
   }
 }
 
+export class AccountStatusError extends Error {
+  readonly statusCode = 403;
+  constructor(message: string) {
+    super(message);
+    this.name = "AccountStatusError";
+  }
+}
+
 // Empreintes scrypt salées (sel_hex:hash_hex) — aucun mot de passe en clair stocké
 const USER_PASSWORD_HASHES: Record<string, string> = {
+  "u-saina":
+    "db77bb564174366f553bfb35366eb99b:8f6db6ced243e2602e588748b2a12e04c6eb12ab6ab81b8388f2179fe990010c",
   "u-1":
     "7f2fec4e39e3de4672a2542841ee5c23:39afc0ce37c27f82f5890012856d09e66466e788cbb41abdeeed8ea9e30de237",
   "u-3":
     "2f4c531b30e3227b0816517196cfd4f5:8bdca9e418bdbd747331d441d8c9320bd431038d109f9c843ea5eef4144fd741",
 };
+
+let usersHydrated = false;
+
+function isTestProcess(): boolean {
+  return (
+    process.env.GUARDIAN_DISABLE_DISK_STATE === "1" ||
+    process.argv.some((arg) => /[/\\](tests|scripts)[/\\]|evaluate\.|idempotence\.test|isolation\.test/.test(arg))
+  );
+}
+
+function getBackendRoot(): string {
+  const cwd = process.cwd();
+  return fs.existsSync(path.join(cwd, "config", "projects")) ? cwd : path.join(cwd, "backend");
+}
+
+function getUsersStateFilePath(): string {
+  return path.join(getBackendRoot(), "data", "users-state.json");
+}
+
+export function ensureUsersHydrated(): void {
+  if (usersHydrated) return;
+  usersHydrated = true;
+  if (isTestProcess()) return;
+
+  const filePath = getUsersStateFilePath();
+  if (!fs.existsSync(filePath)) return;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      users?: AuthPrincipal[];
+      passwordHashes?: Record<string, string>;
+    };
+    if (Array.isArray(parsed.users)) {
+      for (const savedUser of parsed.users) {
+        const idx = usersRegistry.findIndex((u) => u.id === savedUser.id);
+        if (idx >= 0) {
+          usersRegistry[idx] = savedUser;
+        } else {
+          usersRegistry.push(savedUser);
+        }
+      }
+      // Guarantee seeded Super Admin & default users exist with active status
+      for (const seed of DEFAULT_USERS) {
+        if (!usersRegistry.some((u) => u.id === seed.id)) {
+          usersRegistry.unshift({ ...seed, permissions: [...seed.permissions] });
+        }
+      }
+    }
+    if (parsed.passwordHashes && typeof parsed.passwordHashes === "object") {
+      for (const [id, hash] of Object.entries(parsed.passwordHashes)) {
+        if (typeof hash === "string" && hash.includes(":")) {
+          USER_PASSWORD_HASHES[id] = hash;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Impossible de restaurer backend/data/users-state.json :", err);
+  }
+}
+
+export function persistUsersState(): void {
+  if (isTestProcess()) return;
+  try {
+    const filePath = getUsersStateFilePath();
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const tmpPath = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(
+      tmpPath,
+      JSON.stringify(
+        {
+          users: usersRegistry,
+          passwordHashes: USER_PASSWORD_HASHES,
+        },
+        null,
+        2
+      ),
+      { mode: 0o600, encoding: "utf8" }
+    );
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    console.error("Impossible de sauvegarder backend/data/users-state.json :", err);
+  }
+}
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 32).toString("hex");
+  return `${salt}:${hash}`;
+}
 
 let cachedRuntimeSecret: string | null = null;
 
@@ -31,17 +141,9 @@ function getJwtSecret(): string {
   }
   if (cachedRuntimeSecret) return cachedRuntimeSecret;
 
-  const isTest =
-    process.env.GUARDIAN_DISABLE_DISK_STATE === "1" ||
-    process.argv.some((arg) => /[/\\](tests|scripts)[/\\]/.test(arg));
-
-  if (!isTest) {
+  if (!isTestProcess()) {
     try {
-      const cwd = process.cwd();
-      const base = fs.existsSync(path.join(cwd, "config", "projects"))
-        ? cwd
-        : path.join(cwd, "backend");
-      const secretPath = path.join(base, "data", ".session-secret");
+      const secretPath = path.join(getBackendRoot(), "data", ".session-secret");
       if (fs.existsSync(secretPath)) {
         const existing = fs.readFileSync(secretPath, "utf8").trim();
         if (existing.length >= 32) {
@@ -114,6 +216,7 @@ export function signSessionJwt(
 }
 
 export function verifySessionJwt(token: string): AuthPrincipal {
+  ensureUsersHydrated();
   const parts = token.split(".");
   if (parts.length !== 3) {
     throw new AuthUnauthorizedError("Jeton de session malformé.");
@@ -145,16 +248,20 @@ export function verifySessionJwt(token: string): AuthPrincipal {
     throw new AuthUnauthorizedError("Session expirée.");
   }
 
-  const principal = DEFAULT_USERS.find((u) => u.id === claims.sub);
+  const principal = usersRegistry.find((u) => u.id === claims.sub);
   if (!principal) {
     throw new AuthUnauthorizedError("Utilisateur associé à la session introuvable.");
+  }
+  if (principal.status !== "active") {
+    throw new AuthUnauthorizedError("Compte non actif ou en attente de validation.");
   }
   return principal;
 }
 
 export function verifyUserCredentials(email: string, password: string): AuthPrincipal | null {
+  ensureUsersHydrated();
   const normalizedEmail = email.trim().toLowerCase();
-  const user = DEFAULT_USERS.find((u) => u.email.toLowerCase() === normalizedEmail);
+  const user = usersRegistry.find((u) => u.email.toLowerCase() === normalizedEmail);
   if (!user) return null;
 
   const stored = USER_PASSWORD_HASHES[user.id];
@@ -167,7 +274,261 @@ export function verifyUserCredentials(email: string, password: string): AuthPrin
   if (derived.length !== expected.length || !crypto.timingSafeEqual(derived, expected)) {
     return null;
   }
+
+  if (user.status === "pending") {
+    throw new AccountStatusError(
+      "Compte en attente de validation par le Super Admin (SAINA) ou un administrateur."
+    );
+  }
+  if (user.status === "rejected") {
+    throw new AccountStatusError("Votre demande de création de compte a été refusée.");
+  }
+  if (user.status === "suspended") {
+    throw new AccountStatusError("Ce compte a été suspendu par l'administration.");
+  }
+
   return user;
+}
+
+export function registerPendingAccount(input: {
+  fullName: string;
+  email: string;
+  password: string;
+  department: string;
+  requestedRole?: "COORDINATEUR" | "ANALYSTE" | "LECTEUR";
+}): AuthPrincipal {
+  ensureUsersHydrated();
+  const normalizedEmail = input.email.trim().toLowerCase();
+  if (usersRegistry.some((u) => u.email.toLowerCase() === normalizedEmail)) {
+    throw new Error("Un compte existe déjà avec cette adresse email.");
+  }
+
+  const role: UserRole = input.requestedRole || "LECTEUR";
+  const id = `u-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+  const account: AuthPrincipal = {
+    id,
+    email: normalizedEmail,
+    fullName: input.fullName.trim(),
+    role,
+    department: input.department.trim(),
+    status: "pending",
+    permissions: [...(ROLE_PERMISSION_PRESETS[role] || ROLE_PERMISSION_PRESETS.LECTEUR)],
+    createdAt: new Date().toISOString(),
+  };
+
+  USER_PASSWORD_HASHES[id] = hashPassword(input.password);
+  usersRegistry.push(account);
+  persistUsersState();
+  return account;
+}
+
+export function createValidatedAccountByAdmin(
+  caller: AuthPrincipal,
+  input: {
+    fullName: string;
+    email: string;
+    password: string;
+    department: string;
+    role: UserRole;
+    permissions?: Permission[];
+    spaceIds?: string[];
+  }
+): AuthPrincipal {
+  ensureUsersHydrated();
+  if (input.role === "SUPER_ADMIN" && caller.role !== "SUPER_ADMIN") {
+    throw new TenantIsolationError("Seul un Super Admin peut créer un autre Super Admin.");
+  }
+  const normalizedEmail = input.email.trim().toLowerCase();
+  if (usersRegistry.some((u) => u.email.toLowerCase() === normalizedEmail)) {
+    throw new Error("Un compte existe déjà avec cette adresse email.");
+  }
+
+  const targetDept =
+    caller.role === "SUPER_ADMIN" ? input.department.trim() : caller.department;
+  const perms =
+    input.permissions && input.permissions.length > 0
+      ? input.permissions.filter((p): p is Permission => ALL_PERMISSIONS.includes(p))
+      : [...(ROLE_PERMISSION_PRESETS[input.role] || ROLE_PERMISSION_PRESETS.ANALYSTE)];
+
+  const id = `u-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+  const now = new Date().toISOString();
+  const account: AuthPrincipal = {
+    id,
+    email: normalizedEmail,
+    fullName: input.fullName.trim(),
+    role: input.role,
+    department: targetDept,
+    status: "active",
+    permissions: perms,
+    createdAt: now,
+    validatedBy: caller.email,
+    validatedAt: now,
+  };
+
+  USER_PASSWORD_HASHES[id] = hashPassword(input.password);
+  usersRegistry.push(account);
+  assignUserToSpaces(account, input.spaceIds);
+  persistUsersState();
+  return account;
+}
+
+export function assignUserToSpaces(user: AuthPrincipal, spaceIds?: string[]): void {
+  const userTenant = deriveTenantId(user.department);
+  if (Array.isArray(spaceIds) && spaceIds.length > 0) {
+    for (const sp of tenantSpacesRegistry) {
+      const wantsMember = spaceIds.includes(sp.id);
+      const isMember = sp.memberUserIds.includes(user.id);
+      if (wantsMember && !isMember) {
+        sp.memberUserIds.push(user.id);
+      } else if (!wantsMember && isMember && sp.ownerUserId !== user.id) {
+        sp.memberUserIds = sp.memberUserIds.filter((id) => id !== user.id);
+      }
+    }
+    return;
+  }
+
+  // Ensure active non-super-admin users belong to at least one space in their tenant
+  if (user.role !== "SUPER_ADMIN") {
+    const existing = tenantSpacesRegistry.find((s) => s.tenantId === userTenant);
+    if (existing) {
+      if (!existing.memberUserIds.includes(user.id)) {
+        existing.memberUserIds.push(user.id);
+      }
+    } else {
+      createUserSpace(
+        userTenant,
+        user.id,
+        `Espace Principal — ${user.department}`,
+        "Espace isolé attribué lors de la validation"
+      );
+    }
+  }
+}
+
+export function approveOrRejectPendingAccount(
+  caller: AuthPrincipal,
+  input: {
+    userId: string;
+    decision: "approve" | "reject";
+    role?: UserRole;
+    permissions?: Permission[];
+    spaceIds?: string[];
+  }
+): AuthPrincipal {
+  ensureUsersHydrated();
+  const target = usersRegistry.find((u) => u.id === input.userId);
+  if (!target) {
+    throw new Error("Utilisateur introuvable.");
+  }
+  if (
+    caller.role !== "SUPER_ADMIN" &&
+    deriveTenantId(target.department) !== deriveTenantId(caller.department)
+  ) {
+    throw new TenantIsolationError("Accès refusé : utilisateur hors de votre organisation.");
+  }
+  if (input.role === "SUPER_ADMIN" && caller.role !== "SUPER_ADMIN") {
+    throw new TenantIsolationError("Seul un Super Admin peut attribuer le rôle SUPER_ADMIN.");
+  }
+
+  const now = new Date().toISOString();
+  target.validatedBy = caller.email;
+  target.validatedAt = now;
+
+  if (input.decision === "reject") {
+    target.status = "rejected";
+    persistUsersState();
+    return target;
+  }
+
+  const nextRole: UserRole = (input.role || target.role || "COORDINATEUR") as UserRole;
+  target.role = nextRole;
+  target.status = "active";
+  target.permissions =
+    input.permissions && input.permissions.length > 0
+      ? input.permissions.filter((p): p is Permission => ALL_PERMISSIONS.includes(p))
+      : [...(ROLE_PERMISSION_PRESETS[nextRole] || ROLE_PERMISSION_PRESETS.COORDINATEUR)];
+
+  assignUserToSpaces(target, input.spaceIds);
+  persistUsersState();
+  return target;
+}
+
+export function updateAccountPermissions(
+  caller: AuthPrincipal,
+  input: {
+    userId: string;
+    role?: UserRole;
+    permissions?: Permission[];
+    status?: "active" | "suspended";
+    spaceIds?: string[];
+  }
+): AuthPrincipal {
+  ensureUsersHydrated();
+  const target = usersRegistry.find((u) => u.id === input.userId);
+  if (!target) {
+    throw new Error("Utilisateur introuvable.");
+  }
+  if (
+    caller.role !== "SUPER_ADMIN" &&
+    deriveTenantId(target.department) !== deriveTenantId(caller.department)
+  ) {
+    throw new TenantIsolationError("Accès refusé : utilisateur hors de votre organisation.");
+  }
+  if (target.role === "SUPER_ADMIN" && caller.role !== "SUPER_ADMIN") {
+    throw new TenantIsolationError("Seul un Super Admin peut modifier un compte Super Admin.");
+  }
+  if (input.role === "SUPER_ADMIN" && caller.role !== "SUPER_ADMIN") {
+    throw new TenantIsolationError("Seul un Super Admin peut attribuer le rôle SUPER_ADMIN.");
+  }
+
+  if (target.id === caller.id && input.status === "suspended") {
+    throw new Error("Impossible de suspendre votre propre compte actif.");
+  }
+  if (
+    target.role === "SUPER_ADMIN" &&
+    (input.status === "suspended" || (input.role && input.role !== "SUPER_ADMIN"))
+  ) {
+    const otherActiveSuperAdmins = usersRegistry.filter(
+      (u) => u.id !== target.id && u.role === "SUPER_ADMIN" && u.status === "active"
+    );
+    if (otherActiveSuperAdmins.length === 0) {
+      throw new Error("Au moins un Super Admin actif doit rester configuré.");
+    }
+  }
+
+  if (input.role) {
+    target.role = input.role;
+    if (!input.permissions) {
+      target.permissions = [
+        ...(ROLE_PERMISSION_PRESETS[input.role] || ROLE_PERMISSION_PRESETS.LECTEUR),
+      ];
+    }
+  }
+  if (Array.isArray(input.permissions)) {
+    target.permissions = input.permissions.filter((p): p is Permission =>
+      ALL_PERMISSIONS.includes(p)
+    );
+  }
+  if (input.status) {
+    target.status = input.status;
+  }
+  if (Array.isArray(input.spaceIds)) {
+    assignUserToSpaces(target, input.spaceIds);
+  }
+
+  persistUsersState();
+  return target;
+}
+
+export function listManageableUsers(caller: AuthPrincipal): AuthPrincipal[] {
+  ensureUsersHydrated();
+  if (caller.role === "SUPER_ADMIN") {
+    return usersRegistry.map((u) => ({ ...u, permissions: [...u.permissions] }));
+  }
+  const callerTenant = deriveTenantId(caller.department);
+  return usersRegistry
+    .filter((u) => deriveTenantId(u.department) === callerTenant)
+    .map((u) => ({ ...u, permissions: [...u.permissions] }));
 }
 
 export function parseCookies(cookieHeader?: string): Record<string, string> {

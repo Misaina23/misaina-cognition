@@ -15,6 +15,7 @@ import {
   Moon,
   ShieldCheck,
   Sun,
+  UserCog,
   X,
 } from "lucide-react";
 import { guardianApi, type AuthUser, type UserSpace } from "@/lib/api";
@@ -93,6 +94,21 @@ export function AppSidebar({ spaceId }: AppSidebarProps) {
       active: pathname.startsWith(`${base}/knowledge`),
     },
   ];
+
+  const canManageUsers = Boolean(
+    user?.permissions?.includes("users:manage") ||
+      user?.role === "SUPER_ADMIN" ||
+      user?.role === "ADMIN"
+  );
+  if (canManageUsers) {
+    navItems.push({
+      href: `${base}/users`,
+      label: "Utilisateurs & Droits",
+      description: "Validation comptes & RBAC",
+      icon: UserCog,
+      active: pathname.startsWith(`${base}/users`),
+    });
+  }
 
   const currentSpace = spaces.find((s) => s.id === spaceId);
 
@@ -210,8 +226,13 @@ export function AppSidebar({ spaceId }: AppSidebarProps) {
         </div>
 
         {user && (
-          <div className="rounded-xl border border-border bg-background/60 px-3 py-2 text-[11px]">
-            <p className="truncate font-semibold text-foreground">{user.fullName}</p>
+          <div className="rounded-xl border border-border bg-background/60 px-3 py-2 text-[11px] space-y-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="truncate font-semibold text-foreground">{user.fullName}</p>
+              <span className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase text-primary">
+                {user.role}
+              </span>
+            </div>
             <p className="truncate font-mono text-[10px] text-muted-foreground">{user.email}</p>
           </div>
         )}

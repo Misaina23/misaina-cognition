@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, KeyRound, Lock, ShieldCheck } from "lucide-react";
-import { guardianApi } from "@/lib/api";
+import { ArrowLeft, KeyRound, Lock, ShieldCheck, UserPlus } from "lucide-react";
+import { describeApiError, guardianApi } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,8 +21,8 @@ export default function LoginPage() {
       const res = await guardianApi.login(email.trim(), password);
       const firstSpaceId = res.spaces?.[0]?.id;
       router.replace(firstSpaceId ? `/dashboard/${encodeURIComponent(firstSpaceId)}` : "/workspace");
-    } catch {
-      setError("Identifiants invalides ou session refusée par le serveur.");
+    } catch (err) {
+      setError(describeApiError(err));
     } finally {
       setLoading(false);
     }
@@ -107,6 +107,16 @@ export default function LoginPage() {
             {loading ? "Vérification…" : "Ouvrir une session signée"}
           </button>
         </form>
+
+        <div className="flex items-center justify-between rounded-xl border border-border bg-background/70 px-3.5 py-2.5 text-xs">
+          <span className="text-muted-foreground">Nouveau collaborateur ?</span>
+          <Link
+            href="/register"
+            className="inline-flex items-center gap-1.5 font-semibold text-primary hover:underline"
+          >
+            <UserPlus size={13} /> Demander un compte
+          </Link>
+        </div>
 
         <div className="border-t border-border pt-4 flex items-start gap-2 text-[11px] text-muted-foreground leading-relaxed">
           <Lock size={13} className="mt-0.5 shrink-0 text-primary" />

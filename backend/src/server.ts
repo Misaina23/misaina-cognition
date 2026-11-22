@@ -7,6 +7,7 @@ import { handleAuthRoute } from "./routes/auth";
 import { handleKnowledgeRoute } from "./routes/knowledge";
 import { handleRunsRoute } from "./routes/runs";
 import { handleSourcesRoute, sendJson } from "./routes/sources";
+import { handleUsersRoute } from "./routes/users";
 import { startWorker, stopWorker } from "./worker";
 
 const PORT = Number(process.env.BACKEND_PORT || process.env.PORT || 4000);
@@ -103,6 +104,7 @@ export function createGuardianServer() {
       typeof req.headers.cookie === "string" && req.headers.cookie.includes("gardien_session=");
     const isCsrfExempt =
       url.pathname === "/api/auth/login" ||
+      url.pathname === "/api/auth/register" ||
       url.pathname === "/api/auth/logout" ||
       url.pathname === "/api/contact/enterprise" ||
       url.pathname.startsWith("/api/webhooks/ingest/");
@@ -143,6 +145,9 @@ export function createGuardianServer() {
     }
     if (url.pathname.startsWith("/api/auth")) {
       return handleAuthRoute(req, res, url);
+    }
+    if (url.pathname.startsWith("/api/users")) {
+      return handleUsersRoute(req, res, url);
     }
     if (
       url.pathname.startsWith("/api/sources") ||

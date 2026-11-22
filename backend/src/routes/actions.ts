@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { AuthUnauthorizedError } from "../auth";
 import { journalRepo, resolveValidationItem, rollbackAgentAction } from "../journal";
-import { TenantIsolationError } from "../tenant";
+import { requirePermission, TenantIsolationError } from "../tenant";
 import { readJsonBody, resolveHttpContext, sendJson } from "./sources";
 
 const RollbackSchema = z.object({
@@ -25,7 +25,8 @@ export async function handleActionsRoute(
     await journalRepo.ensureReady();
     if (url.pathname.startsWith("/api/validations")) {
       if (req.method === "GET") {
-        const { ctx } = resolveHttpContext(req, url);
+        const { user, ctx } = resolveHttpContext(req, url);
+        requirePermission(user, "meal:read");
         return sendJson(res, 200, {
           tenantId: ctx.tenantId,
           spaceId: ctx.spaceId,
@@ -34,7 +35,8 @@ export async function handleActionsRoute(
       }
       if (req.method === "POST") {
         const body = ValidationDecisionSchema.parse(await readJsonBody(req));
-        const { ctx } = resolveHttpContext(req, url, body.spaceId);
+        const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+        requirePermission(user, "meal:validate");
         const resolved = resolveValidationItem(ctx, body.validationId, body.decision);
         await journalRepo.flushPg();
         return sendJson(res, 200, resolved);
@@ -42,7 +44,8 @@ export async function handleActionsRoute(
     }
 
     if (req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:read");
       const runId = url.searchParams.get("runId") || undefined;
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
@@ -53,7 +56,8 @@ export async function handleActionsRoute(
 
     if (req.method === "POST") {
       const body = RollbackSchema.parse(await readJsonBody(req));
-      const { ctx } = resolveHttpContext(req, url, body.spaceId);
+      const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "meal:rollback");
       const revertedAction = rollbackAgentAction(ctx, body.actionId);
       await journalRepo.flushPg();
       return sendJson(res, 200, {

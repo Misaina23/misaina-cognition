@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
+  AccountStatusError,
   authenticateRequest,
   AuthUnauthorizedError,
   buildClearSessionCookieHeader,
   buildSessionCookieHeader,
+  registerPendingAccount,
   signSessionJwt,
   verifyUserCredentials,
 } from "../auth";
@@ -17,6 +19,14 @@ const LoginSchema = z.object({
   password: z.string().min(1),
 });
 
+const RegisterSchema = z.object({
+  fullName: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(6),
+  department: z.string().min(2),
+  requestedRole: z.enum(["COORDINATEUR", "ANALYSTE", "LECTEUR"]).optional(),
+});
+
 export async function handleAuthRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -24,6 +34,26 @@ export async function handleAuthRoute(
 ): Promise<void> {
   try {
     await journalRepo.ensureReady();
+
+    if (url.pathname === "/api/auth/register" && req.method === "POST") {
+      const body = RegisterSchema.parse(await readJsonBody(req));
+      const created = registerPendingAccount(body);
+      return sendJson(res, 201, {
+        registered: true,
+        status: created.status,
+        message:
+          "Demande de création de compte enregistrée (en attente de validation par le Super Admin SAINA ou un administrateur).",
+        user: {
+          id: created.id,
+          email: created.email,
+          fullName: created.fullName,
+          department: created.department,
+          role: created.role,
+          status: created.status,
+          createdAt: created.createdAt,
+        },
+      });
+    }
 
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
       const body = LoginSchema.parse(await readJsonBody(req));
@@ -58,8 +88,11 @@ export async function handleAuthRoute(
     if (err instanceof AuthUnauthorizedError) {
       return sendJson(res, 401, { message: err.message });
     }
-    return sendJson(res, 400, {
-      message: err instanceof Error ? err.message : "Erreur authentification",
-    });
+    if (err instanceof AccountStatusError) {
+      return sendJson(res, 403, { message: err.message });
+    }
+    const msg = err instanceof Error ? err.message : "Erreur authentification";
+    const status = msg.includes("existe déjà") ? 409 : 400;
+    return sendJson(res, status, { message: msg });
   }
 }

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AuthUnauthorizedError } from "../auth";
 import { journalRepo } from "../journal";
 import { knowledgeEngine, type ClassificationLevel, type CryptographicCitation } from "../rag/engine";
-import { TenantIsolationError } from "../tenant";
+import { requirePermission, TenantIsolationError } from "../tenant";
 import { readJsonBody, resolveHttpContext, sendJson } from "./sources";
 
 const IngestDocSchema = z.object({
@@ -68,7 +68,8 @@ export async function handleKnowledgeRoute(
     await journalRepo.ensureReady();
 
     if (url.pathname === "/api/knowledge/documents" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "knowledge:read");
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,
@@ -79,6 +80,7 @@ export async function handleKnowledgeRoute(
     if (url.pathname === "/api/knowledge/documents" && req.method === "POST") {
       const body = IngestDocSchema.parse(await readJsonBody(req));
       const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "knowledge:write");
       const doc = knowledgeEngine.ingestDocument(ctx, {
         title: body.title,
         fileName: body.fileName,
@@ -97,6 +99,7 @@ export async function handleKnowledgeRoute(
         url.pathname.replace("/api/knowledge/documents/", "").split("/")[0] || ""
       );
       const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "knowledge:write");
       const deleted = knowledgeEngine.deleteDocument(ctx, docId, user.email, user.role);
       if (!deleted) return sendJson(res, 404, { message: "Document introuvable." });
       return sendJson(res, 200, { deleted: true, id: docId });
@@ -105,6 +108,7 @@ export async function handleKnowledgeRoute(
     if (url.pathname === "/api/knowledge/query" && req.method === "POST") {
       const body = RagQuerySchema.parse(await readJsonBody(req));
       const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "knowledge:read");
       const result = await knowledgeEngine.queryHybridRag(ctx, {
         question: body.question,
         clearanceFilter: body.clearanceFilter,
@@ -115,7 +119,8 @@ export async function handleKnowledgeRoute(
     }
 
     if (url.pathname === "/api/knowledge/queries" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "knowledge:read");
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,
@@ -126,6 +131,7 @@ export async function handleKnowledgeRoute(
     if (url.pathname === "/api/knowledge/verify-proof" && req.method === "POST") {
       const body = VerifyProofSchema.parse(await readJsonBody(req));
       const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "knowledge:read");
       const verification = knowledgeEngine.verifyCitationProof(ctx, {
         chunkHash: body.chunkHash,
         queryHash: body.queryHash,
@@ -140,6 +146,7 @@ export async function handleKnowledgeRoute(
     if (url.pathname === "/api/knowledge/export-docx" && req.method === "POST") {
       const body = ExportDocxSchema.parse(await readJsonBody(req));
       const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "knowledge:write");
       const { buffer, fileName } = await knowledgeEngine.exportBriefingDocx(ctx, {
         question: body.question,
         answer: body.answer,
@@ -160,7 +167,8 @@ export async function handleKnowledgeRoute(
     }
 
     if (url.pathname === "/api/knowledge/audit" && req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "knowledge:read");
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,

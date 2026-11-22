@@ -11,6 +11,7 @@ import { getSpaceAlertSettings } from "../notify/index";
 import {
   createUserSpace,
   listAuthorizedSpaces,
+  requirePermission,
   resolveContextForUser,
   TenantIsolationError,
   tenantSpacesRegistry,
@@ -116,6 +117,7 @@ export async function handleSourcesRoute(
 
     if (url.pathname === "/api/spaces" && req.method === "POST") {
       const user = authenticateRequest(req);
+      requirePermission(user, "spaces:create");
       const body = (await readJsonBody(req)) as { name?: string; description?: string };
       const ctx = resolveContextForUser(user);
       const space = createUserSpace(ctx.tenantId, user.id, body.name || "Nouvel espace", body.description);
@@ -125,7 +127,8 @@ export async function handleSourcesRoute(
     }
 
     if (req.method === "GET") {
-      const { ctx } = resolveHttpContext(req, url);
+      const { user, ctx } = resolveHttpContext(req, url);
+      requirePermission(user, "meal:read");
       return sendJson(res, 200, {
         tenantId: ctx.tenantId,
         spaceId: ctx.spaceId,
@@ -135,7 +138,8 @@ export async function handleSourcesRoute(
 
     if (req.method === "POST" && url.pathname.endsWith("/ingest")) {
       const body = IngestPayloadSchema.parse(await readJsonBody(req));
-      const { ctx } = resolveHttpContext(req, url, body.spaceId);
+      const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "meal:ingest");
 
       const isExcel = body.fileName?.toLowerCase().endsWith(".xlsx");
       const source =
@@ -192,7 +196,8 @@ export async function handleSourcesRoute(
 
     if (req.method === "POST") {
       const body = RegisterSourceSchema.parse(await readJsonBody(req));
-      const { ctx } = resolveHttpContext(req, url, body.spaceId);
+      const { user, ctx } = resolveHttpContext(req, url, body.spaceId);
+      requirePermission(user, "meal:ingest");
       const source = journalRepo.upsertSource(ctx, {
         id: `src-${ctx.spaceId}-${Date.now()}`,
         name: body.name,
