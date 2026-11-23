@@ -68,8 +68,8 @@ async function testResendAndDevRedirect() {
 async function testCorsTrailingSlashNormalization() {
   const prevCors = process.env.CORS_ORIGIN;
   const prevFrontend = process.env.FRONTEND_URL;
-  process.env.CORS_ORIGIN = "https://misaina-cognition.vercel.app/";
-  process.env.FRONTEND_URL = "https://misaina-cognition.vercel.app/";
+  process.env.CORS_ORIGIN = "https://cognitionmisaina.vercel.app/";
+  process.env.FRONTEND_URL = "https://cognitionmisaina.vercel.app/";
 
   const server = createGuardianServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -84,7 +84,7 @@ async function testCorsTrailingSlashNormalization() {
           port: addr.port,
           path: "/api/health",
           method: "OPTIONS",
-          headers: { Origin: "https://misaina-cognition.vercel.app" },
+          headers: { Origin: "https://cognitionmisaina.vercel.app" },
         },
         (r) => {
           resolve({
@@ -98,7 +98,7 @@ async function testCorsTrailingSlashNormalization() {
     });
 
     assert.equal(res.status, 204);
-    assert.equal(res.allowOrigin, "https://misaina-cognition.vercel.app");
+    assert.equal(res.allowOrigin, "https://cognitionmisaina.vercel.app");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (prevCors === undefined) delete process.env.CORS_ORIGIN;

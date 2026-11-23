@@ -101,7 +101,7 @@ async function main() {
       headers: {
         "Content-Type": "application/json",
         "X-Forwarded-Proto": "https",
-        Origin: "https://misaina-cognition.vercel.app",
+        Origin: "https://cognitionmisaina.vercel.app",
       },
       body: JSON.stringify({ email: "dir.exec@misaina-corp.org", password: "DirExec2026!" }),
     });

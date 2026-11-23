@@ -16,6 +16,7 @@ import {
   FileSpreadsheet,
   FlaskConical,
   FolderInput,
+  LayoutDashboard,
   Mail,
   MapPin,
   MessageSquare,
@@ -35,6 +36,7 @@ import { PipelineMetricsStrip } from "@/components/dashboard/PipelineMetricsStri
 import { RecordsExplorer } from "@/components/dashboard/RecordsExplorer";
 import { SystemDiagnosticsCard } from "@/components/dashboard/SystemDiagnosticsCard";
 import { DashboardSkeleton } from "@/components/Skeletons";
+import { GeneratedDataDashboard } from "@/components/dashboard/GeneratedDataDashboard";
 import { SpaceHeader } from "@/components/SpaceHeader";
 import { ToastBanner, type BannerMessage } from "@/components/ToastBanner";
 import {
@@ -59,7 +61,7 @@ import {
   type ZoneBreakdown,
 } from "@/lib/api";
 
-type ActiveTab = "agent_pipeline" | "data_sources" | "rules";
+type ActiveTab = "agent_pipeline" | "data_sources" | "data_dashboard" | "rules";
 
 const SAMPLE_KOBO_JSON = JSON.stringify(
   [
@@ -165,6 +167,8 @@ export default function DashboardSpacePage() {
   const [ruleFeedback, setRuleFeedback] = useState<RuleFeedbackStat[]>([]);
   const [ruleSuggestions, setRuleSuggestions] = useState<RuleThresholdSuggestion[]>([]);
   const [unexpectedEval, setUnexpectedEval] = useState<UnexpectedEvalReport | null>(null);
+  const [benchmarkUnavailable, setBenchmarkUnavailable] = useState(false);
+  const [generatedDashboardAt, setGeneratedDashboardAt] = useState<string | null>(null);
 
   const [severityFilter, setSeverityFilter] = useState<"all" | Anomaly["severity"]>("all");
   const [loading, setLoading] = useState(true);
@@ -199,17 +203,15 @@ export default function DashboardSpacePage() {
     if (!spaceId) return;
     setLoading(true);
     try {
-      const [runsRes, actionsRes, valRes, srcRes, recRes, rulesRes, fbRes, evalRes] =
-        await Promise.all([
-          guardianApi.getRuns(spaceId),
-          guardianApi.getActions(spaceId),
-          guardianApi.getValidations(spaceId),
-          guardianApi.getSources(spaceId),
-          guardianApi.getRecords(spaceId, true),
-          guardianApi.getRules(spaceId),
-          guardianApi.getRuleFeedback(spaceId),
-          guardianApi.getUnexpectedEvaluation(spaceId),
-        ]);
+      const [runsRes, actionsRes, valRes, srcRes, recRes, rulesRes, fbRes] = await Promise.all([
+        guardianApi.getRuns(spaceId),
+        guardianApi.getActions(spaceId),
+        guardianApi.getValidations(spaceId),
+        guardianApi.getSources(spaceId),
+        guardianApi.getRecords(spaceId, true),
+        guardianApi.getRules(spaceId),
+        guardianApi.getRuleFeedback(spaceId),
+      ]);
       setRuns(runsRes.runs || []);
       setAnomalies(runsRes.anomalies || []);
       setEmailSummaries(runsRes.emailSummaries || []);
@@ -230,7 +232,17 @@ export default function DashboardSpacePage() {
       setYamlDraft(rulesRes.rawYaml || "");
       setRuleFeedback(fbRes.feedback || []);
       setRuleSuggestions(fbRes.suggestions || []);
-      setUnexpectedEval(evalRes);
+      try {
+        setUnexpectedEval(await guardianApi.getUnexpectedEvaluation(spaceId));
+        setBenchmarkUnavailable(false);
+      } catch (evalErr) {
+        if (isUnauthorizedError(evalErr)) {
+          router.replace("/login");
+          return;
+        }
+        setUnexpectedEval(null);
+        setBenchmarkUnavailable(true);
+      }
     } catch (err) {
       if (isUnauthorizedError(err)) {
         router.replace("/login");
@@ -248,6 +260,12 @@ export default function DashboardSpacePage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  function handleGenerateDataDashboard() {
+    setGeneratedDashboardAt(new Date().toISOString());
+    setTab("data_dashboard");
+    void refresh();
+  }
 
   async function handleCopyText(key: string, text: string) {
     try {
@@ -558,6 +576,14 @@ export default function DashboardSpacePage() {
           <>
             <button
               type="button"
+              onClick={handleGenerateDataDashboard}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10 whitespace-nowrap shrink-0"
+            >
+              <LayoutDashboard size={13} />
+              Tableau de bord interactif
+            </button>
+            <button
+              type="button"
               onClick={() => void handleRun("agent")}
               disabled={runningMode !== null}
               className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
@@ -639,6 +665,17 @@ export default function DashboardSpacePage() {
                 }`}
               >
                 <Database size={13} /> Collectes, Webhooks &amp; NLQ ({records.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateDataDashboard}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  tab === "data_dashboard"
+                    ? "bg-foreground text-background"
+                    : "border border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <LayoutDashboard size={13} /> Tableau de bord données
               </button>
               <button
                 type="button"
@@ -1123,6 +1160,15 @@ export default function DashboardSpacePage() {
         )}
 
         {/* ONGLET 2 : Collectes CommCare / Kobo, Webhooks Temps Réel, Email Config & NLQ */}
+        {tab === "data_dashboard" && (
+          <GeneratedDataDashboard
+            records={records}
+            anomalies={anomalies}
+            sources={sources}
+            generatedAt={generatedDashboardAt || new Date().toISOString()}
+          />
+        )}
+
         {tab === "data_sources" && (
           <div className="space-y-6">
             {/* Centre d'Automatisation, Webhook & Notifications */}
@@ -1653,6 +1699,12 @@ export default function DashboardSpacePage() {
             </section>
 
             {/* Benchmark R&D repliable pour ne pas encombrer le pilotage quotidien */}
+            {benchmarkUnavailable && (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+                Le benchmark de recherche est momentanément indisponible. Les données, imports et
+                indicateurs opérationnels restent accessibles.
+              </p>
+            )}
             {unexpectedEval && (
               <details className="group rounded-xl border border-border bg-card p-5 shadow-sm">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3">

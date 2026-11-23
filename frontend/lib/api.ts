@@ -145,6 +145,7 @@ export interface NormalizedRecord {
   latitude: number | null;
   longitude: number | null;
   zone: string | null;
+  recordedAt?: string | null;
   enumeratorId?: string | null;
   status: "active" | "archived" | "merged";
   mergedIntoId?: string;
@@ -807,5 +808,4 @@ export interface ZoneBreakdown {
   totalAmount: number;
   anomaliesCount: number;
 }
-
 
