@@ -59,9 +59,9 @@ const state: JournalState = {
     },
     {
       id: "src-u3-kobo",
-      tenantId: "tenant-operations-sahel-dakar",
+      tenantId: "tenant-operations-terrain-madagascar",
       spaceId: "space-u3-sahel",
-      name: "KoboToolbox Enquête Sahel",
+      name: "KoboToolbox Enquête Madagascar",
       type: "generic",
       format: "kobo",
       status: "ACTIVE",

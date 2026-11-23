@@ -152,7 +152,7 @@
       "errorType": "geo_zone_mismatch",
       "expectedCategory": "geo_out_of_bounds",
       "expectedRouting": "human_validation",
-      "description": "Coordonnées GPS à Saint-Louis alors que la zone d'intervention déclarée est Dakar."
+      "description": "Coordonnées GPS à Mahajanga alors que la zone d'intervention déclarée est Antananarivo."
     },
     {
       "externalId": "BEN-150",
@@ -160,7 +160,7 @@
       "errorType": "geo_zone_mismatch",
       "expectedCategory": "geo_out_of_bounds",
       "expectedRouting": "human_validation",
-      "description": "Coordonnées GPS à Kaolack alors que la zone d'intervention déclarée est Ziguinchor."
+      "description": "Coordonnées GPS à Toamasina alors que la zone d'intervention déclarée est Toliara."
     }
   ]
 }

@@ -445,16 +445,16 @@ class SovereignKnowledgeEngine {
       version: number;
       content: string;
     }> =
-      ctx.tenantId === "tenant-operations-sahel-dakar"
+      ctx.tenantId === "tenant-operations-terrain-madagascar"
         ? [
             {
-              title: "Protocole Opérationnel Collecte Terrain Sahel 2026",
-              fileName: "protocole_collecte_sahel_2026.pdf",
-              department: "Opérations Sahel - Dakar",
+              title: "Protocole Opérationnel Collecte Terrain Madagascar 2026",
+              fileName: "protocole_collecte_madagascar_2026.pdf",
+              department: "Opérations terrain - Madagascar",
               classification: "RESTREINT",
               version: 2,
               content:
-                "Validation GPS et périmètres d'enquête : Chaque soumission collectée via KoboToolbox ou CommCare doit comporter des coordonnées GPS situées dans un rayon maximal de 25 km autour du chef-lieu de zone déclaré (Dakar, Kaolack, Tambacounda, Matam). Les écarts hors périmètre déclenchent une anomalie bloquante.\n\nContrôle anti-duplication et qualité enquêteur : Les numéros de téléphone sont normalisés au format E.164 (+221). Une détection automatique identifie les saisies copier-coller répétitives effectuées par un même agent terrain sur une fenêtre inférieure à 90 secondes.",
+                "Données de démonstration uniquement : les exemples de zones (Antananarivo, Antsirabe, Toamasina, Fianarantsoa, Mahajanga et Toliara) et les coordonnées associées sont synthétiques. Chaque soumission KoboToolbox ou CommCare doit être contrôlée selon le périmètre réel du projet avant analyse. Les téléphones fictifs utilisent le préfixe malgache +261.\n\nContrôle anti-duplication : une détection identifie les saisies copier-coller répétitives effectuées par un même agent terrain sur une fenêtre inférieure à 90 secondes.",
             },
             {
               title: "Directive Pseudonymisation & Protection Bénéficiaires (PSSI Terrain)",

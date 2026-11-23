@@ -10,7 +10,7 @@
     {
       "externalId": "IMP-022",
       "errorType": "fake_repeated_phone",
-      "description": "Numéro de téléphone factice à chiffres répétés (+221000000000)."
+      "description": "Numéro de téléphone factice à chiffres répétés (+261000000000)."
     },
     {
       "externalId": "IMP-023",

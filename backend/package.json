@@ -8,7 +8,7 @@
     "db:init": "node dist/src/initDb.js",
     "start": "node dist/src/server.js",
     "start:sh": "sh ./start.sh",
-    "test": "tsx tests/evaluate.ts && tsx tests/idempotence.test.ts && tsx tests/isolation.test.ts && tsx tests/unexpected_eval.test.ts && tsx tests/auth.test.ts && tsx tests/users_rbac.test.ts && tsx tests/nlq.test.ts && tsx tests/improvements.test.ts && tsx tests/meal_autonomous.test.ts && tsx tests/llm_provider.test.ts && tsx tests/notify_email.test.ts && tsx tests/security_knowledge.test.ts",
+    "test": "tsx tests/evaluate.ts && tsx tests/idempotence.test.ts && tsx tests/isolation.test.ts && tsx tests/unexpected_eval.test.ts && tsx tests/auth.test.ts && tsx tests/users_rbac.test.ts && tsx tests/nlq.test.ts && tsx tests/improvements.test.ts && tsx tests/meal_autonomous.test.ts && tsx tests/meal_projects.test.ts && tsx tests/llm_provider.test.ts && tsx tests/notify_email.test.ts && tsx tests/security_knowledge.test.ts",
     "evaluate": "node dist/tests/evaluate.js",
     "test:idempotence": "node dist/tests/idempotence.test.js",
     "test:isolation": "node dist/tests/isolation.test.js"
@@ -23,6 +23,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.16",
     "papaparse": "^5.4.1",
+    "pdf-parse": "^1.1.1",
     "pg": "^8.23.1",
     "zod": "^4.0.0"
   },

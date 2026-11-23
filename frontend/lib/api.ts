@@ -132,6 +132,83 @@ export interface DataSourceConfig {
   createdAt: string;
 }
 
+export interface MealIndicatorValue {
+  id: string;
+  indicatorId: string;
+  period: string;
+  value: number;
+  sourceFile: string;
+  sourceLocation: string;
+  confidence: number;
+  status: "proposed" | "validated" | "rejected";
+  reviewNote?: string;
+  createdAt: string;
+}
+
+export interface MealIndicatorProgress {
+  indicator: {
+    id: string;
+    projectId: string;
+    objectiveId: string;
+    name: string;
+    unit: string;
+    baseline: number;
+    target: number;
+    direction: "increase" | "decrease";
+    frequency: "monthly" | "quarterly" | "annual";
+    periodType: "cumulative" | "monthly";
+    verificationSource: string;
+    aliases: string[];
+    targetHistory: Array<{
+      target: number;
+      effectiveAt: string;
+      changedAt: string;
+      changedBy: string;
+      reason: string;
+    }>;
+  };
+  targetAtPeriod: number;
+  currentValue: MealIndicatorValue | null;
+  actualPercent: number | null;
+  expectedPercent: number;
+  status: "on_track" | "late" | "critical" | "no_data";
+}
+
+export interface MealProjectObjectiveProgress {
+  objective: { id: string; type: "global" | "specific"; label: string };
+  indicators: MealIndicatorProgress[];
+}
+
+export interface MealProject {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  zone: string;
+  donor: string;
+  objectives?: MealProjectObjectiveProgress[];
+}
+
+export interface MealValueValidation {
+  id: string;
+  projectId: string;
+  indicatorId: string;
+  period: string;
+  value: number;
+  sourceFile: string;
+  sourceLocation: string;
+  confidence: number;
+  status: "proposed" | "validated" | "rejected";
+  reviewNote?: string;
+}
+
+export interface MealImportPreview {
+  headers: string[];
+  rows: Array<{ rowNumber: number; cells: Record<string, unknown>; addresses?: Record<string, string> }>;
+  suggestions: Record<string, { indicatorId: string; confidence: number } | null>;
+  format?: "xlsx" | "pdf";
+}
+
 export interface NormalizedRecord {
   id: string;
   externalId: string;
@@ -391,6 +468,93 @@ export const guardianApi = {
         params: { spaceId },
       })
       .then((r) => r.data),
+
+  getMealProjects: (spaceId: string, period?: string) =>
+    api.get<{
+      projects: MealProject[];
+      pendingValues: MealValueValidation[];
+      summaries: Array<{ projectId: string; period: string; text: string; createdAt: string }>;
+      actions: Array<{ id: string; action: string; timestamp: string; reversible: boolean; revertedAt?: string }>;
+    }>("/projects", { params: { spaceId, period } }).then((r) => r.data),
+  createMealProject: (spaceId: string, payload: Omit<MealProject, "id" | "objectives">) =>
+    api.post<{ project: MealProject }>("/projects", { spaceId, ...payload }).then((r) => r.data),
+  createMealObjective: (
+    spaceId: string,
+    projectId: string,
+    payload: { type: "global" | "specific"; label: string }
+  ) => api.post(`/projects/${encodeURIComponent(projectId)}/objectives`, { spaceId, ...payload }),
+  createMealIndicator: (
+    spaceId: string,
+    projectId: string,
+    payload: {
+      objectiveId: string;
+      name: string;
+      unit: string;
+      baseline: number;
+      target: number;
+      direction: "increase" | "decrease";
+      frequency: "monthly" | "quarterly" | "annual";
+      periodType: "cumulative" | "monthly";
+      verificationSource: string;
+      aliases: string[];
+    }
+  ) => api.post(`/projects/${encodeURIComponent(projectId)}/indicators`, { spaceId, ...payload }),
+  changeMealIndicatorTarget: (
+    spaceId: string,
+    projectId: string,
+    indicatorId: string,
+    payload: { target: number; effectiveAt: string; reason: string }
+  ) =>
+    api.post(
+      `/projects/${encodeURIComponent(projectId)}/targets/${encodeURIComponent(indicatorId)}`,
+      { spaceId, ...payload }
+    ),
+  previewMealImport: (spaceId: string, fileName: string, fileBase64: string) =>
+    api
+      .post<MealImportPreview>("/projects/import/preview", { spaceId, fileName, fileBase64 })
+      .then((r) => r.data),
+  importMealReport: (payload: {
+    spaceId: string;
+    projectId: string;
+    fileName: string;
+    fileBase64: string;
+    period?: string;
+    periodHeader?: string;
+    mapping: Record<string, string>;
+  }) => api.post<{ inserted: number; skippedIdempotent: number; proposed: number }>("/projects/import", payload).then((r) => r.data),
+  decideMealValue: (
+    spaceId: string,
+    valueId: string,
+    decision: "validated" | "rejected",
+    reason?: string
+  ) => api.post("/projects/values/decision", { spaceId, valueId, decision, reason }),
+  undoMealAction: (spaceId: string, actionId: string) =>
+    api.post("/projects/undo", { spaceId, actionId }),
+  summarizeMealProject: (spaceId: string, projectId: string, period: string) =>
+    api.post<{
+      summary: string;
+      provider: string;
+      model: string;
+      tokensUsed: number;
+      costUsd: number;
+      llmCalls: number;
+      partialContext: boolean;
+      fallbackReason?: string;
+    }>("/projects/summary", { spaceId, projectId, period }).then((r) => r.data),
+  downloadMealReport: async (
+    spaceId: string,
+    projectId: string,
+    period: string,
+    format: "xlsx" | "docx"
+  ): Promise<{ blob: Blob; fileName: string }> => {
+    const response = await api.get<Blob>("/projects/export", {
+      params: { spaceId, projectId, period, format },
+      responseType: "blob",
+    });
+    const disposition = String(response.headers["content-disposition"] || "");
+    const fileName = /filename="([^"]+)"/.exec(disposition)?.[1];
+    return { blob: response.data, fileName: fileName || `rapport-meal-${period}.${format}` };
+  },
   registerSource: (payload: {
     spaceId: string;
     name: string;
@@ -808,4 +972,3 @@ export interface ZoneBreakdown {
   totalAmount: number;
   anomaliesCount: number;
 }
-

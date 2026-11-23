@@ -25,8 +25,8 @@ async function main() {
       source: src,
       fileBuffer: Buffer.from(
         "id;full_name;telephone;age;lat;lon;zone\n" +
-          "I1;Fatou Sow;+221771112233;30;14.70;-17.44;Dakar\n" +
-          "I2;Fatou Sow;00221771112233;30;14.70;-17.44;Dakar\n",
+          "I1;Fatou Sow;+261771112233;30;-18.8792;47.5079;Antananarivo\n" +
+          "I2;Fatou Sow;00261771112233;30;-18.8792;47.5079;Antananarivo\n",
         "utf8"
       ),
       fileName: "isolation.csv",

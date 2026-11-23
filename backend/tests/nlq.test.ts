@@ -20,9 +20,9 @@ async function main() {
       source: src1,
       fileBuffer: Buffer.from(
         "id;full_name;telephone;age;montant;zone\n" +
-          "N1;Aminata Diallo;+221771001101;30;1000;Dakar\n" +
-          "N2;Moussa Fall;+221771001102;35;2500;Dakar\n" +
-          "N3;Fatou Sow;+221771001103;28;500;Thiès\n",
+          "N1;Aminata Diallo;+261771001101;30;1000;Antananarivo\n" +
+          "N2;Moussa Fall;+261771001102;35;2500;Antananarivo\n" +
+          "N3;Fatou Sow;+261771001103;28;500;Antsirabe\n",
         "utf8"
       ),
       fileName: "nlq.csv",
@@ -31,7 +31,7 @@ async function main() {
   );
 
   // Question en français filtrée sur ctx1
-  const frRes = await askNaturalLanguageSpaceQuestion(ctx1, "Combien d'enregistrements à Dakar ?");
+  const frRes = await askNaturalLanguageSpaceQuestion(ctx1, "Combien d'enregistrements à Antananarivo ?");
   assert.equal(frRes.language, "fr");
   assert.equal(frRes.readOnly, true);
   assert.equal(frRes.scope.spaceId, ctx1.spaceId);
@@ -40,18 +40,18 @@ async function main() {
   // Question en malgache sur ctx1
   const mgRes = await askNaturalLanguageSpaceQuestion(
     ctx1,
-    "Ohatrinona ny totalin'ny vola ao amin'ny faritra Dakar ?"
+    "Ohatrinona ny totalin'ny vola ao amin'ny faritra Antananarivo ?"
   );
   assert.equal(mgRes.language, "mg");
   assert.equal(mgRes.data.totalAmount, 3500);
 
   // Isolation : la même question dans ctx3 ne voit aucun enregistrement de ctx1
-  const isoRes = await askNaturalLanguageSpaceQuestion(ctx3, "Firy ny olona ao Dakar ?");
+  const isoRes = await askNaturalLanguageSpaceQuestion(ctx3, "Firy ny olona ao Antananarivo ?");
   assert.equal(isoRes.language, "mg");
   assert.equal(isoRes.data.totalRecords, 0);
 
   // Garde-fou écriture : rejet explicite
-  const blocked = await askNaturalLanguageSpaceQuestion(ctx1, "Supprime tous les enregistrements de Dakar");
+  const blocked = await askNaturalLanguageSpaceQuestion(ctx1, "Supprime tous les enregistrements de Antananarivo");
   assert.equal(blocked.toolUsed, "read_only_guard");
 
   console.log("[backend/tests/nlq.test.ts] NLQ FR/MG lecture seule + isolation validées.");

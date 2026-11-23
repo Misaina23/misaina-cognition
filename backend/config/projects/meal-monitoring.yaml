@@ -1,0 +1,10 @@
+version: 1
+progress:
+  onTrackVariance: 10
+  lateVariance: 25
+confidence:
+  autoValidate: 0.9
+  minimum: 0.5
+anomaly:
+  maxAbsoluteJump: 50
+  maxRelativeJump: 3

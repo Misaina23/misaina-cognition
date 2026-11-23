@@ -31,7 +31,7 @@ async function main() {
 
   const ccSrc = journalRepo.ensureSourceForType(ctx, "commcare", "CommCare Idempotence");
   const cc = new CommCareConnector();
-  const ccNoDate = [{ id: "cc-idemp-1", form: { full_name: "Awa", zone: "Dakar" } }];
+  const ccNoDate = [{ id: "cc-idemp-1", form: { full_name: "Awa", zone: "Antananarivo" } }];
   const c1 = await cc.ingest({ source: ccSrc, rawItems: ccNoDate }, ctx);
   const c2 = await cc.ingest({ source: ccSrc, rawItems: ccNoDate }, ctx);
   assert.equal(c1.insertedCount, 1);
@@ -40,7 +40,7 @@ async function main() {
 
   const genSrc = journalRepo.ensureSourceForType(ctx, "generic", "Kobo Idempotence", { format: "kobo" });
   const gen = new GenericConnector();
-  const kobo = [{ _id: "kb-1", nom: "Moussa", zone: "Thiès" }];
+  const kobo = [{ _id: "kb-1", nom: "Moussa", zone: "Antsirabe" }];
   const g1 = await gen.ingest({ source: genSrc, rawItems: kobo }, ctx);
   const g2 = await gen.ingest({ source: genSrc, rawItems: kobo }, ctx);
   assert.equal(g1.insertedCount, 1);

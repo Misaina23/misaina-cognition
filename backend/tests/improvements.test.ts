@@ -25,16 +25,16 @@ async function main() {
       source: src,
       fileBuffer: Buffer.from(
         "id;full_name;telephone;age;montant;lat;lon;zone\n" +
-          "F1;Moussa Diallo;+221770001101;30;400;14.70;-17.44;Dakar\n" +
-          "F2;Moussa Dialo;+221770001102;30;400;14.70;-17.44;Dakar\n" +
-          "F3;Awa Ndiaye;+221770002201;25;450;14.71;-17.45;Dakar\n" +
-          "F4;Awa Ndiay;+221770002202;25;450;14.71;-17.45;Dakar\n" +
-          "F5;Oumar Sow;+221770003301;40;500;14.72;-17.46;Dakar\n" +
-          "F6;Oumar So;+221770003302;40;500;14.72;-17.46;Dakar\n" +
-          "F7;Fatou Ba;+221770004401;29;500;14.73;-17.47;Dakar\n" +
-          "F8;Ibrahima Fall;+221770005501;31;500;14.74;-17.48;Dakar\n" +
-          "F9;Kadiatou Sy;+221770006601;33;500;14.75;-17.49;Dakar\n" +
-          "F10;Cheikh Kane;+221770007701;35;500;14.76;-17.43;Dakar\n",
+          "F1;Moussa Diallo;+261770001101;30;400;-18.8792;47.5079;Antananarivo\n" +
+          "F2;Moussa Dialo;+261770001102;30;400;-18.8792;47.5079;Antananarivo\n" +
+          "F3;Awa Ndiaye;+261770002201;25;450;-18.88;47.51;Antananarivo\n" +
+          "F4;Awa Ndiay;+261770002202;25;450;-18.88;47.51;Antananarivo\n" +
+          "F5;Oumar Sow;+261770003301;40;500;-18.881;47.512;Antananarivo\n" +
+          "F6;Oumar So;+261770003302;40;500;-18.881;47.512;Antananarivo\n" +
+          "F7;Fatou Ba;+261770004401;29;500;-18.882;47.513;Antananarivo\n" +
+          "F8;Ibrahima Fall;+261770005501;31;500;-18.883;47.514;Antananarivo\n" +
+          "F9;Kadiatou Sy;+261770006601;33;500;-18.884;47.515;Antananarivo\n" +
+          "F10;Cheikh Kane;+261770007701;35;500;-18.885;47.516;Antananarivo\n",
         "utf8"
       ),
       fileName: "feedback.csv",

@@ -6,6 +6,7 @@ import { knowledgeEngine } from "./rag/engine";
 import { handleActionsRoute } from "./routes/actions";
 import { handleAuthRoute } from "./routes/auth";
 import { handleKnowledgeRoute } from "./routes/knowledge";
+import { handleProjectsRoute } from "./routes/projects";
 import { handleRunsRoute } from "./routes/runs";
 import { handleSourcesRoute, sendJson } from "./routes/sources";
 import { handleUsersRoute } from "./routes/users";
@@ -175,6 +176,9 @@ export function createGuardianServer() {
     }
     if (url.pathname.startsWith("/api/users")) {
       return handleUsersRoute(req, res, url);
+    }
+    if (url.pathname.startsWith("/api/projects")) {
+      return handleProjectsRoute(req, res, url);
     }
     if (
       url.pathname.startsWith("/api/sources") ||

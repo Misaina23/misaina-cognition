@@ -43,6 +43,7 @@ export interface LlmChatParams {
   messages: LlmMessage[];
   tools?: LlmToolDeclaration[];
   schema?: Record<string, unknown>;
+  maxOutputTokens?: number;
 }
 
 export interface LlmUsage {
@@ -200,6 +201,7 @@ export class GeminiProvider implements LlmProvider {
         contents,
         config: {
           systemInstruction: params.system,
+          ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
           ...(functionDeclarations ? { tools: [{ functionDeclarations }] } : {}),
           ...(params.schema ? { responseMimeType: "application/json" } : {}),
           ...(responseSchema ? { responseSchema } : {}),
@@ -290,6 +292,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         body: JSON.stringify({
           model: this.modelName,
           messages,
+          ...(params.maxOutputTokens ? { max_tokens: params.maxOutputTokens } : {}),
           ...(tools?.length ? { tools } : {}),
           ...(params.schema ? { response_format: { type: "json_object" } } : {}),
         }),
@@ -393,7 +396,7 @@ export class AnthropicProvider implements LlmProvider {
         },
         body: JSON.stringify({
           model: this.modelName,
-          max_tokens: 1024,
+          max_tokens: params.maxOutputTokens ?? 1024,
           system: params.system,
           messages,
           ...(tools?.length ? { tools } : {}),

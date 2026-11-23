@@ -37,6 +37,7 @@ import { RecordsExplorer } from "@/components/dashboard/RecordsExplorer";
 import { SystemDiagnosticsCard } from "@/components/dashboard/SystemDiagnosticsCard";
 import { DashboardSkeleton } from "@/components/Skeletons";
 import { GeneratedDataDashboard } from "@/components/dashboard/GeneratedDataDashboard";
+import { MealProjectsPanel } from "@/components/dashboard/MealProjectsPanel";
 import { SpaceHeader } from "@/components/SpaceHeader";
 import { ToastBanner, type BannerMessage } from "@/components/ToastBanner";
 import {
@@ -61,26 +62,26 @@ import {
   type ZoneBreakdown,
 } from "@/lib/api";
 
-type ActiveTab = "agent_pipeline" | "data_sources" | "data_dashboard" | "rules";
+type ActiveTab = "agent_pipeline" | "data_sources" | "data_dashboard" | "meal_projects" | "rules";
 
 const SAMPLE_KOBO_JSON = JSON.stringify(
   [
     {
       _id: "kobo-101",
-      nom_complet: "Kadiatou Traoré",
-      telephone: "+221776001122",
+      nom_complet: "Mialy Rakoto",
+      telephone: "+261340001122",
       age: 31,
-      _geolocation: [14.7167, -17.4677],
-      zone: "Dakar",
+      _geolocation: [-18.8792, 47.5079],
+      zone: "Antananarivo",
       enqueteur: "ENQ-01",
     },
     {
       _id: "kobo-102",
-      nom_complet: "Binta Diouf",
-      telephone: "+221778889900",
+      nom_complet: "Soa Randria",
+      telephone: "+261340008899",
       age: 162,
-      _geolocation: [14.14, -16.07],
-      zone: "Dakar",
+      _geolocation: [-18.1492, 49.4023],
+      zone: "Toamasina",
       enqueteur: "ENQ-02",
     },
   ],
@@ -90,7 +91,7 @@ const SAMPLE_KOBO_JSON = JSON.stringify(
 
 const NLQ_EXAMPLES = [
   "Combien d'enregistrements par zone ?",
-  "Firy ny olona ao Dakar ary ohatrinona ny vola totaliny ?",
+  "Firy ny olona ao Antananarivo ary ohatrinona ny vola totaliny ?",
   "Quelles sont les anomalies bloquantes ?",
 ];
 
@@ -148,6 +149,7 @@ export default function DashboardSpacePage() {
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [emailSummaries, setEmailSummaries] = useState<RunEmailSummary[]>([]);
   const [selectedEmailIdx, setSelectedEmailIdx] = useState(0);
+  const [showDemoConfirmation, setShowDemoConfirmation] = useState(false);
   const [automation, setAutomation] = useState<AutomationStatus | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [mealIndicators, setMealIndicators] = useState<MealIndicators | null>(null);
@@ -307,14 +309,7 @@ export default function DashboardSpacePage() {
   }
 
   function handleDemoRun() {
-    if (
-      !window.confirm(
-        "Cette démonstration ajoutera des enregistrements synthétiques à l’espace actuel. Ne l’exécutez pas dans un espace opérationnel. Continuer ?"
-      )
-    ) {
-      return;
-    }
-    void handleRun("demo_kobo_ingest");
+    setShowDemoConfirmation(true);
   }
 
   async function handleDecideValidation(validationId: string, decision: "approved" | "rejected") {
@@ -688,6 +683,17 @@ export default function DashboardSpacePage() {
               >
                 <FileCode2 size={13} /> Règles YAML &amp; Calibration
                 {ruleSuggestions.length > 0 ? ` (${ruleSuggestions.length})` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("meal_projects")}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  tab === "meal_projects"
+                    ? "bg-foreground text-background"
+                    : "border border-border bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <FileSpreadsheet size={13} /> Projets &amp; indicateurs MEAL
               </button>
             </div>
 
@@ -1169,6 +1175,8 @@ export default function DashboardSpacePage() {
           />
         )}
 
+        {tab === "meal_projects" && <MealProjectsPanel spaceId={spaceId} />}
+
         {tab === "data_sources" && (
           <div className="space-y-6">
             {/* Centre d'Automatisation, Webhook & Notifications */}
@@ -1544,7 +1552,7 @@ export default function DashboardSpacePage() {
                   type="text"
                   value={nlqInput}
                   onChange={(e) => setNlqInput(e.target.value)}
-                  placeholder="Ex. Combien d'anomalies bloquantes ? ou Firy ny olona ao Dakar ?"
+                  placeholder="Ex. Combien d'anomalies bloquantes ? ou Firy ny olona ao Antananarivo ?"
                   className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"
                 />
                 <button
@@ -1805,6 +1813,19 @@ export default function DashboardSpacePage() {
         )}
       </main>
 
+      <ConfirmDialog
+        open={showDemoConfirmation}
+        title="Lancer la démonstration MEAL ?"
+        description="Cette démonstration ajoutera des enregistrements synthétiques à l’espace actuel. Ne l’exécutez pas dans un espace opérationnel. Continuer ?"
+        confirmLabel="Lancer la démo"
+        variant="warning"
+        busy={Boolean(runningMode)}
+        onCancel={() => setShowDemoConfirmation(false)}
+        onConfirm={async () => {
+          setShowDemoConfirmation(false);
+          await handleRun("demo_kobo_ingest");
+        }}
+      />
       <ConfirmDialog
         open={Boolean(confirmRollbackId)}
         title="Confirmer l'annulation (Rollback)"

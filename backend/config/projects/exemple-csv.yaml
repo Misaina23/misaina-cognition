@@ -1,5 +1,5 @@
 version: 1
-projectName: "Collecte Terrain CSV / Excel — Sénégal"
+projectName: "Collecte Terrain CSV / Excel — Madagascar"
 requiredFields:
   - field: fullName
     severity: bloquante
@@ -25,40 +25,40 @@ ranges:
     severity: a_verifier
 geoBounds:
   enabled: true
-  zoneName: "Bassin Sahel & Afrique de l'Ouest"
-  minLat: 4.0
-  maxLat: 27.5
-  minLon: -18.0
-  maxLon: 16.5
+  zoneName: "Madagascar"
+  minLat: -25.0
+  maxLat: -11.0
+  minLon: 43.0
+  maxLon: 51.0
   rejectZeroZero: true
   severity: bloquante
   mismatchSeverity: a_verifier
   interventionZones:
-    - name: "Dakar"
-      minLat: 14.55
-      maxLat: 14.88
-      minLon: -17.55
-      maxLon: -17.15
-    - name: "Thiès"
-      minLat: 14.60
-      maxLat: 15.05
-      minLon: -17.15
-      maxLon: -16.65
-    - name: "Kaolack"
-      minLat: 13.95
-      maxLat: 14.35
-      minLon: -16.30
-      maxLon: -15.85
-    - name: "Saint-Louis"
-      minLat: 15.80
-      maxLat: 16.25
-      minLon: -16.65
-      maxLon: -16.25
-    - name: "Ziguinchor"
-      minLat: 12.40
-      maxLat: 12.75
-      minLon: -16.45
-      maxLon: -16.05
+    - name: "Antananarivo"
+      minLat: -19.05
+      maxLat: -18.70
+      minLon: 47.35
+      maxLon: 47.70
+    - name: "Antsirabe"
+      minLat: -20.05
+      maxLat: -19.70
+      minLon: 46.85
+      maxLon: 47.20
+    - name: "Toamasina"
+      minLat: -18.35
+      maxLat: -17.95
+      minLon: 49.20
+      maxLon: 49.60
+    - name: "Mahajanga"
+      minLat: -15.90
+      maxLat: -15.50
+      minLon: 46.10
+      maxLon: 46.50
+    - name: "Toliara"
+      minLat: -23.55
+      maxLat: -23.15
+      minLon: 43.45
+      maxLon: 43.90
 duplicateDetection:
   exactBusinessKeyFields:
     - fullName

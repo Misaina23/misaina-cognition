@@ -515,7 +515,7 @@ export default function UsersManagementPage() {
                         type="text"
                         required
                         minLength={2}
-                        placeholder="Ex. Mission Sahel"
+                        placeholder="Ex. Mission terrain Madagascar"
                         value={newDepartment}
                         onChange={(e) => setNewDepartment(e.target.value)}
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary"

@@ -58,9 +58,9 @@ async function main() {
         source: src,
         fileBuffer: Buffer.from(
           "id;full_name;telephone;age;montant;lat;lon;zone\n" +
-            "M1;Aminata Diop;+221771110001;32;500;14.70;-17.44;Dakar\n" +
-            "M2;Aminata Diop;+221771110001;32;500;14.70;-17.44;Dakar\n" +
-            "M3;Cheikh Ndiaye;+221772220002;165;450;14.72;-17.46;Dakar\n",
+            "M1;Aminata Diop;+261771110001;32;500;-18.8792;47.5079;Antananarivo\n" +
+            "M2;Aminata Diop;+261771110001;32;500;-18.8792;47.5079;Antananarivo\n" +
+            "M3;Cheikh Ndiaye;+261772220002;165;450;-18.8792;47.5079;Antananarivo\n",
           "utf8"
         ),
         fileName: "mock_llm.csv",
@@ -147,7 +147,7 @@ async function main() {
     assert.ok(observedCalls[2].schema);
     const toolLoopMsgJson = JSON.stringify(observedCalls[1].messages);
     assert.equal(toolLoopMsgJson.includes("Aminata Diop"), false);
-    assert.equal(toolLoopMsgJson.includes("+221771110001"), false);
+    assert.equal(toolLoopMsgJson.includes("+261771110001"), false);
 
     // Vérifier la journalisation de CHAQUE appel LLM dans agent_actions
     const llmActions = journalRepo

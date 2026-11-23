@@ -1,0 +1,66 @@
+{
+  "reason": "blocking_anomalies",
+  "count": 12,
+  "anomalies": [
+    {
+      "id": "anom-run-1795439299798-wd8i-1",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-5c2dfe455846-1795439299706-138",
+      "ruleId": "range_age"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-2",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-fbf96affd196-1795439299707-139",
+      "ruleId": "range_age"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-3",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-b795ee67ceed-1795439299707-140",
+      "ruleId": "range_age"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-4",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-155f0df1cfb7-1795439299707-141",
+      "ruleId": "range_age"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-5",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-3c92810caa74-1795439299708-142",
+      "ruleId": "required_fullName"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-6",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-8d0db6f7061f-1795439299708-143",
+      "ruleId": "required_fullName"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-9",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-139665e15941-1795439299714-146",
+      "ruleId": "geo_bounds"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-10",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-d11f822f86d2-1795439299714-147",
+      "ruleId": "geo_bounds"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-13",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-757dea2f708f-1795439299703-130",
+      "ruleId": "exact_duplicate_business_key"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-14",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-db63511d57c0-1795439299703-131",
+      "ruleId": "exact_duplicate_business_key"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-15",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-2f7f84a991f1-1795439299703-132",
+      "ruleId": "exact_duplicate_business_key"
+    },
+    {
+      "id": "anom-run-1795439299798-wd8i-16",
+      "recordId": "rec-src-space-1795439299461-akkg-csv-1795439299464-d10338448c53-1795439299704-133",
+      "ruleId": "exact_duplicate_business_key"
+    }
+  ]
+}
