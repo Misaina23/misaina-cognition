@@ -42,16 +42,16 @@ import {
 type KnowledgeTab = "assistant" | "vault" | "audit";
 
 const SUGGESTED_QUESTIONS = [
-  "Comment l'isolation inter-filiales SecNumCloud est-elle garantie ?",
-  "Quel est le protocole de fusion BM25 + RRF et vérification SHA-256 ?",
-  "Quels sont les seuils d'alerte GPS et copier-coller sur le terrain Sahel ?",
+  "Quelles règles s'appliquent aux accès et à la classification des documents ?",
+  "Comment vérifier l'origine d'une citation dans une réponse ?",
+  "Quelles vérifications sont faites sur les collectes terrain ?",
 ];
 
 const CLEARANCE_OPTIONS: Array<{ value: ClassificationLevel | "ALL"; label: string }> = [
   { value: "ALL", label: "Tous niveaux PSSI" },
-  { value: "CONFIDENTIEL", label: "Jusqu'à CONFIDENTIEL" },
-  { value: "RESTREINT", label: "Jusqu'à RESTREINT" },
-  { value: "INTERNE", label: "Jusqu'à INTERNE" },
+  { value: "CONFIDENTIEL", label: "CONFIDENTIEL uniquement" },
+  { value: "RESTREINT", label: "RESTREINT uniquement" },
+  { value: "INTERNE", label: "INTERNE uniquement" },
   { value: "PUBLIC", label: "PUBLIC uniquement" },
 ];
 
@@ -205,7 +205,7 @@ export default function SovereignKnowledgePage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      setBanner({ kind: "ok", text: `Note de synthèse certifiée générée (${fileName}).` });
+      setBanner({ kind: "ok", text: `Note de synthèse avec sources générée (${fileName}).` });
       const auditRes = await guardianApi.getKnowledgeAudit(spaceId);
       setAudit(auditRes.audit || []);
     } catch (err) {
@@ -435,7 +435,7 @@ export default function SovereignKnowledgePage() {
                 : "border border-border bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
-            <ShieldCheck size={13} /> Audit &amp; Conformité SecNumCloud ({audit.length})
+            <ShieldCheck size={13} /> Audit &amp; intégrité ({audit.length})
           </button>
         </div>
 
@@ -446,10 +446,10 @@ export default function SovereignKnowledgePage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">
-                    Interrogation Hybride BM25 + Vecteurs Denses (RRF)
+                    Recherche documentaire avec sources
                   </h2>
                   <p className="text-xs text-muted-foreground">
-                    Chaque réponse s&apos;appuie uniquement sur les fragments autorisés de ce tenant et génère des citations scellées HMAC-SHA256.
+                    Les réponses citent les extraits correspondants au texte recherché. Les preuves peuvent être vérifiées dans l&apos;onglet Audit.
                   </p>
                 </div>
                 <select
@@ -478,7 +478,7 @@ export default function SovereignKnowledgePage() {
                   type="text"
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="Posez une question sur vos directives PSSI, procédures SecNumCloud ou protocoles terrain..."
+                  placeholder="Posez une question sur les documents de cet espace..."
                   className="flex-1 rounded-lg border border-border bg-background px-3.5 py-2.5 text-xs outline-none focus:border-primary"
                 />
                 <button
@@ -487,7 +487,7 @@ export default function SovereignKnowledgePage() {
                   className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50 whitespace-nowrap shrink-0"
                 >
                   <Send size={13} />
-                  {querying ? "Calcul RRF…" : "Exécuter requête RAG"}
+                  {querying ? "Recherche…" : "Rechercher"}
                 </button>
               </form>
 
@@ -516,10 +516,10 @@ export default function SovereignKnowledgePage() {
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
                       <div>
                         <h3 className="text-sm font-semibold text-foreground">
-                          Synthèse documentaire certifiée
+                          Résultat de recherche documentaire
                         </h3>
                         <p className="font-mono text-[11px] text-muted-foreground">
-                          {activeResult.llmProvider} / {activeResult.llmModel} · Confiance{" "}
+                          Couverture des termes recherchés{" "}
                           {(activeResult.confidence * 100).toFixed(0)} % · Filtre{" "}
                           {activeResult.clearanceApplied}
                         </p>
@@ -531,7 +531,7 @@ export default function SovereignKnowledgePage() {
                         className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
                       >
                         <FileDown size={13} />
-                        {exportingDocx ? "Export…" : "Exporter note .docx certifiée"}
+                        {exportingDocx ? "Export…" : "Exporter note .docx avec sources"}
                       </button>
                     </div>
 
@@ -733,7 +733,7 @@ export default function SovereignKnowledgePage() {
                   Indexer un document dans le coffre isolé
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Découpage sémantique, vectorisation 128-dim, indexation BM25 et calcul d&apos;arbre de Merkle SHA-256.
+                  Découpage par paragraphes, recherche lexicale BM25 et empreintes SHA-256 pour vérifier les sources.
                 </p>
               </div>
 

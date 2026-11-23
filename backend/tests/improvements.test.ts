@@ -4,6 +4,7 @@ import { CsvConnector } from "../src/connectors/csv";
 import { journalRepo, resolveValidationItem } from "../src/journal";
 import { createLlmProvider } from "../src/llm/provider";
 import { generateWeeklySpaceDocxBuffer } from "../src/reports/weeklyDocx";
+import { runDeterministicControls, ProjectRulesSchema } from "../src/rules/engine";
 import { createUserSpace, getPrincipalByIdOrHeader, resolveContextForUser } from "../src/tenant";
 
 async function main() {
@@ -19,7 +20,7 @@ async function main() {
   // 2. Ingestion + Run + Observabilité (#4)
   const csv = new CsvConnector();
   const src = journalRepo.ensureSourceForType(ctx, "csv", "Source Feedback");
-  await csv.ingest(
+  const ingestion = await csv.ingest(
     {
       source: src,
       fileBuffer: Buffer.from(
@@ -40,6 +41,51 @@ async function main() {
     },
     ctx
   );
+
+  const requiredQuestionRules = ProjectRulesSchema.parse({
+    requiredFields: [{ field: "q_eau", severity: "bloquante", label: "Source d'eau" }],
+  });
+  const sampleRecord = ingestion.normalizedRecords[0];
+  assert.ok(sampleRecord);
+  const missingCustomAnswer = runDeterministicControls({
+    ctx,
+    runId: "custom-required-field-test",
+    records: [
+      {
+        ...sampleRecord,
+        extra: { ...sampleRecord.extra, q_eau: "   " },
+      },
+    ],
+    rules: requiredQuestionRules,
+  });
+  assert.equal(missingCustomAnswer.anomalies.length, 1);
+  assert.equal(missingCustomAnswer.anomalies[0].ruleId, "required_q_eau");
+
+  const missingMultiSelectAnswer = runDeterministicControls({
+    ctx,
+    runId: "custom-required-empty-list-test",
+    records: [
+      {
+        ...sampleRecord,
+        extra: { ...sampleRecord.extra, q_eau: [] },
+      },
+    ],
+    rules: requiredQuestionRules,
+  });
+  assert.equal(missingMultiSelectAnswer.anomalies.length, 1);
+
+  const answeredCustomQuestion = runDeterministicControls({
+    ctx,
+    runId: "custom-required-field-answer-test",
+    records: [
+      {
+        ...sampleRecord,
+        extra: { ...sampleRecord.extra, q_eau: "forage" },
+      },
+    ],
+    rules: requiredQuestionRules,
+  });
+  assert.equal(answeredCustomQuestion.anomalies.length, 0);
 
   const runRes = await runGuardianAgent(ctx, { sourceId: src.id, trigger: "upload" });
   assert.equal(typeof runRes.run.durationMs, "number");
@@ -74,7 +120,7 @@ async function main() {
   assert.equal(docx.buffer.subarray(0, 2).toString("utf8"), "PK");
 
   console.log(
-    "[backend/tests/improvements.test.ts] Observabilité, apprentissage >60% sans auto-modif YAML, Multi-LLM et .docx validés."
+    "[backend/tests/improvements.test.ts] Champs MEAL personnalisés, observabilité, apprentissage sans auto-modif YAML, Multi-LLM et .docx validés."
   );
 }
 

@@ -124,6 +124,70 @@ export interface EnterpriseLeadRequest {
 }
 
 const VECTOR_DIM = 128;
+const RAG_STOP_WORDS = new Set([
+  "a",
+  "au",
+  "aux",
+  "avec",
+  "ce",
+  "ces",
+  "dans",
+  "de",
+  "des",
+  "du",
+  "elle",
+  "en",
+  "et",
+  "eux",
+  "il",
+  "ils",
+  "la",
+  "le",
+  "les",
+  "leur",
+  "lui",
+  "mais",
+  "me",
+  "meme",
+  "mes",
+  "mon",
+  "ne",
+  "nos",
+  "notre",
+  "nous",
+  "on",
+  "ou",
+  "par",
+  "pas",
+  "pour",
+  "que",
+  "quel",
+  "quelle",
+  "quels",
+  "quelles",
+  "qui",
+  "sa",
+  "sans",
+  "se",
+  "ses",
+  "son",
+  "sur",
+  "ta",
+  "te",
+  "tes",
+  "toi",
+  "ton",
+  "tu",
+  "un",
+  "une",
+  "vos",
+  "votre",
+  "vous",
+  "comment",
+  "combien",
+  "est",
+  "sont",
+]);
 
 function isKnowledgePersistenceDisabled(): boolean {
   if (process.env.GUARDIAN_DISABLE_DISK_STATE === "1") return true;
@@ -170,12 +234,12 @@ function normalizeAndTokenize(text: string): string[] {
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, " ")
     .split(/\s+/)
-    .filter((t) => t.length >= 2);
+    .filter((t) => t.length >= 2 && !RAG_STOP_WORDS.has(t));
 }
 
 /**
- * Projection vectorielle dense déterministe 128 dimensions (unigrammes + bigrammes + trigrammes)
- * permettant une recherche hybride reproductible sans dépendance réseau externe.
+ * Projection locale de termes sur 128 dimensions. Elle aide au classement des résultats
+ * lexicaux, mais ne remplace pas un modèle d'embeddings sémantiques.
  */
 function computeDenseVector(text: string): number[] {
   const vec = new Float64Array(VECTOR_DIM);
@@ -686,7 +750,8 @@ class SovereignKnowledgeEngine {
       return { item, score: Number(score.toFixed(4)) };
     });
 
-    const bm25Sorted = [...bm25Scores].sort((a, c) => c.score - a.score);
+    const relevantBm25Scores = bm25Scores.filter((entry) => entry.score > 0);
+    const bm25Sorted = [...relevantBm25Scores].sort((a, c) => c.score - a.score);
     const bm25RankMap = new Map<string, number>();
     bm25Sorted.forEach((entry, idx) => bm25RankMap.set(entry.item.chunk.id, idx + 1));
     const bm25LatencyMs = Math.max(2, Date.now() - bm25Start);
@@ -698,26 +763,27 @@ class SovereignKnowledgeEngine {
       item,
       score: cosineSimilarity(queryVec, item.chunk.vector),
     }));
-    const vecSorted = [...vecScores].sort((a, c) => c.score - a.score);
+    const vectorScoreByChunk = new Map(
+      vecScores.map((entry) => [entry.item.chunk.id, entry.score] as const)
+    );
+    const relevantChunkIds = new Set(relevantBm25Scores.map((entry) => entry.item.chunk.id));
+    const vecSorted = vecScores
+      .filter((entry) => relevantChunkIds.has(entry.item.chunk.id))
+      .sort((a, c) => c.score - a.score);
     const vecRankMap = new Map<string, number>();
     vecSorted.forEach((entry, idx) => vecRankMap.set(entry.item.chunk.id, idx + 1));
     const vectorLatencyMs = Math.max(4, Date.now() - vecStart);
 
     // 3. Reciprocal Rank Fusion (RRF)
-    const rrfResults = allChunks
-      .map((item, i) => {
-        const bRank = bm25RankMap.get(item.chunk.id) || N;
-        const vRank = vecRankMap.get(item.chunk.id) || N;
-        const bm25Score = bm25Scores[i].score;
-        const vectorScore = vecScores[i].score;
+    const rrfResults = relevantBm25Scores
+      .map(({ item, score: bm25Score }) => {
+        const bRank = bm25RankMap.get(item.chunk.id) || relevantBm25Scores.length;
+        const vRank = vecRankMap.get(item.chunk.id) || relevantBm25Scores.length;
+        const vectorScore = vectorScoreByChunk.get(item.chunk.id) || 0;
         const rrfScore = Number((1 / (60 + bRank) + 1 / (60 + vRank)).toFixed(5));
         return { item, bm25Score, vectorScore, rrfScore };
       })
-      .sort((a, c) => {
-        const aBoost = a.bm25Score > 0 ? a.rrfScore + 0.015 : a.rrfScore;
-        const cBoost = c.bm25Score > 0 ? c.rrfScore + 0.015 : c.rrfScore;
-        return cBoost - aBoost;
-      })
+      .sort((a, c) => c.rrfScore - a.rrfScore)
       .slice(0, 3);
 
     const queryId = `qry-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -765,7 +831,7 @@ class SovereignKnowledgeEngine {
 
         const llmRes = await llm.chat({
           system:
-            "Tu es l'assistant souverain Misaina Cognition. Réponds en français professionnel strict, sans aucun emoji. Base ta réponse EXCLUSIVEMENT sur les fragments fournis et cite-les avec [1], [2], [3]. Si l'information est absente, dis-le clairement.",
+            "Réponds en français, de façon directe et factuelle. Utilise uniquement les extraits fournis et associe chaque affirmation à sa source [1], [2] ou [3]. Si les extraits ne répondent pas à la question, indique clairement l'information manquante. N'invente pas de politique ni d'engagement.",
           messages: [
             {
               role: "user",
@@ -776,7 +842,7 @@ class SovereignKnowledgeEngine {
         if (llmRes.text.trim()) {
           answer = llmRes.text.trim();
         } else {
-          llmFallbackReason = "Réponse LLM vide — repli sur synthèse extractive certifiée.";
+          llmFallbackReason = "Réponse LLM vide — affichage des extraits retrouvés.";
         }
       } catch (err) {
         llmFallbackReason =
@@ -802,16 +868,22 @@ class SovereignKnowledgeEngine {
               `**Source [${i + 1}] — ${r.item.doc.title} (p. ${r.item.chunk.pageNumber}, ${r.item.doc.classification})**\n${r.item.chunk.content}`
           )
           .join("\n\n");
-        answer = `Synthèse certifiée issue du pipeline hybride BM25 + Vecteurs Denses (espace ${ctx.spaceId}) :\n\n${synthesizedSections}`;
+        answer = `Extraits retrouvés dans les documents autorisés :\n\n${synthesizedSections}`;
       }
     }
 
     const totalLatencyMs = Math.max(8, Date.now() - t0);
-    const topBm25 = citations[0]?.bm25Score || 0;
-    const topVec = citations[0]?.vectorScore || 0;
-    const confidence = Number(
-      Math.min(0.98, Math.max(0.76, 0.78 + topVec * 0.14 + (topBm25 > 0 ? 0.08 : 0))).toFixed(2)
-    );
+    const matchedQueryTerms = new Set(rrfResults[0]?.item.chunk.tokens || []);
+    const uniqueQueryTerms = new Set(queryTokens);
+    const termCoverage =
+      uniqueQueryTerms.size === 0
+        ? 0
+        : Number(
+            (
+              [...uniqueQueryTerms].filter((token) => matchedQueryTerms.has(token)).length /
+              uniqueQueryTerms.size
+            ).toFixed(2)
+          );
 
     const result: KnowledgeQueryResult = {
       queryId,
@@ -819,7 +891,7 @@ class SovereignKnowledgeEngine {
       merkleProofRoot,
       answer,
       citations,
-      confidence,
+      confidence: termCoverage,
       bm25LatencyMs,
       vectorLatencyMs,
       totalLatencyMs,

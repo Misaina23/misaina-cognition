@@ -1551,7 +1551,8 @@ export default function DashboardSpacePage() {
                   <h2 className="text-sm font-semibold">Configuration YAML des règles du projet</h2>
                   <p className="text-xs text-muted-foreground">
                     Champs obligatoires, plages, déduplication et zones d&apos;intervention GPS
-                    (`geoBounds.interventionZones`).
+                    (`geoBounds.interventionZones`). Les champs obligatoires peuvent aussi
+                    référencer des réponses de formulaire présentes dans `extra`.
                   </p>
                 </div>
                 <button

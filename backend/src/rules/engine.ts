@@ -11,7 +11,7 @@ export const ProjectRulesSchema = z.object({
   requiredFields: z
     .array(
       z.object({
-        field: z.enum(["fullName", "phone", "email", "age", "amount", "recordedAt", "zone", "externalId"]),
+        field: z.string().trim().min(1),
         severity: SeveritySchema.default("bloquante"),
         label: z.string().optional(),
       })
@@ -127,6 +127,39 @@ export const ProjectRulesSchema = z.object({
 
 export type ProjectRulesConfig = z.infer<typeof ProjectRulesSchema>;
 
+function getRequiredFieldValue(rec: NormalizedRecord, field: string): unknown {
+  const normalizedField = normalizeText(field);
+  const normalizedFields: Record<string, unknown> = {
+    fullname: rec.fullName,
+    phone: rec.phone,
+    email: rec.email,
+    age: rec.age,
+    amount: rec.amount,
+    recordedat: rec.recordedAt,
+    zone: rec.zone,
+    externalid: rec.externalId,
+    enumeratorid: rec.enumeratorId,
+  };
+  if (Object.prototype.hasOwnProperty.call(normalizedFields, normalizedField)) {
+    return normalizedFields[normalizedField];
+  }
+
+  const extraEntry = Object.entries(rec.extra || {}).find(
+    ([key]) => normalizeText(key) === normalizedField
+  );
+  return extraEntry?.[1];
+}
+
+function isEmptyRequiredValue(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim().length === 0) ||
+    (Array.isArray(value) && value.length === 0) ||
+    (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0)
+  );
+}
+
 export function parseProjectRulesYaml(yamlText: string): {
   config: ProjectRulesConfig;
   rawYaml: string;
@@ -190,11 +223,7 @@ export function runDeterministicControls(params: {
 
   for (const rec of records) {
     for (const reqField of rules.requiredFields) {
-      const val = (rec as Record<string, unknown>)[reqField.field];
-      const isEmpty =
-        val === null || val === undefined || (typeof val === "string" && val.trim().length === 0);
-
-      if (isEmpty) {
+      if (isEmptyRequiredValue(getRequiredFieldValue(rec, reqField.field))) {
         pushAnomaly({
           recordId: rec.id,
           ruleId: `required_${reqField.field}`,

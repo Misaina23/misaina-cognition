@@ -125,6 +125,34 @@ async function main() {
       }),
     });
     assert.equal(ragRes.status, 200);
+    const ragBody = (await ragRes.json()) as {
+      citations: Array<{ bm25Score: number }>;
+      confidence: number;
+    };
+    assert.ok(ragBody.citations.length > 0);
+    assert.ok(ragBody.citations.every((citation) => citation.bm25Score > 0));
+    assert.ok(ragBody.confidence > 0);
+
+    const unmatchedRagRes = await fetch(`${baseUrl}/api/knowledge/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: ["Bearer", u1Token].join(" "),
+      },
+      body: JSON.stringify({
+        spaceId: "space-u1-global",
+        question: "xylophone astrophysics quantum entanglement",
+      }),
+    });
+    assert.equal(unmatchedRagRes.status, 200);
+    const unmatchedRagBody = (await unmatchedRagRes.json()) as {
+      citations: unknown[];
+      confidence: number;
+      answer: string;
+    };
+    assert.equal(unmatchedRagBody.citations.length, 0);
+    assert.equal(unmatchedRagBody.confidence, 0);
+    assert.match(unmatchedRagBody.answer, /Aucun document autorisé/);
 
     const verifyOk = await fetch(`${baseUrl}/api/knowledge/verify-audit-chain`, {
       method: "POST",
