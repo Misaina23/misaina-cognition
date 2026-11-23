@@ -21,6 +21,7 @@ COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/tests/fixtures ./tests/fixtures
 COPY config ./config
 COPY start.sh ./start.sh
 
