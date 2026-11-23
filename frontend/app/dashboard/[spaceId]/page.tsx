@@ -288,6 +288,17 @@ export default function DashboardSpacePage() {
     }
   }
 
+  function handleDemoRun() {
+    if (
+      !window.confirm(
+        "Cette démonstration ajoutera des enregistrements synthétiques à l’espace actuel. Ne l’exécutez pas dans un espace opérationnel. Continuer ?"
+      )
+    ) {
+      return;
+    }
+    void handleRun("demo_kobo_ingest");
+  }
+
   async function handleDecideValidation(validationId: string, decision: "approved" | "rejected") {
     setDecidingValidationId(validationId);
     setBanner(null);
@@ -661,7 +672,7 @@ export default function DashboardSpacePage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => void handleRun("demo_kobo_ingest")}
+                  onClick={handleDemoRun}
                   disabled={runningMode !== null}
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-90 whitespace-nowrap shrink-0"
                 >
@@ -1068,7 +1079,7 @@ export default function DashboardSpacePage() {
                             {new Date(act.timestamp).toLocaleTimeString("fr-FR")}
                           </td>
                           <td className="py-2.5 pr-3 font-mono font-semibold text-[11px] text-primary">
-                            {act.toolName}
+                            {act.toolName === "llm_fallback" ? "Repli LLM → règles" : act.toolName}
                           </td>
                           <td className="py-2.5 pr-3 font-mono text-[11px] uppercase">
                             {act.author}
@@ -1176,7 +1187,7 @@ export default function DashboardSpacePage() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => void handleRun("demo_kobo_ingest")}
+                    onClick={handleDemoRun}
                     disabled={runningMode !== null}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
                   >

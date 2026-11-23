@@ -204,6 +204,31 @@ async function main() {
     assert.ok(defaultMockActions.length >= 2);
     assert.equal(defaultMockActions[0].llmProvider, "mock");
 
+    // 4b. Un échec fournisseur est visible et le run continue avec les règles locales
+    const unavailableProvider: LLMProvider = {
+      providerName: "mock",
+      modelName: "unavailable-provider",
+      async chat() {
+        throw new Error("provider temporarily unavailable");
+      },
+    };
+    const failedLlmRes = await runGuardianAgent(ctx, {
+      sourceId: src.id,
+      trigger: "manual",
+      llmProvider: unavailableProvider,
+    });
+    assert.equal(failedLlmRes.usedGemini, false);
+    assert.equal(failedLlmRes.llmProvider, "deterministic");
+    assert.equal(failedLlmRes.run.llmCallsCount, 1);
+    assert.ok(failedLlmRes.run.summaryText?.includes("Le fournisseur LLM n’a pas répondu."));
+    const fallbackAction = journalRepo
+      .listAgentActions(ctx, failedLlmRes.run.id)
+      .find((action) => action.toolName === "llm_fallback");
+    assert.ok(fallbackAction);
+    assert.equal(fallbackAction.output.reasonCode, "provider_unavailable");
+    assert.equal(fallbackAction.output.fallback, "rules-fallback-v1");
+    assert.ok(fallbackAction.decision.includes("validation"));
+
     const defaultNlqRes = await askNaturalLanguageSpaceQuestion(ctx, "Résumé de l'espace");
     assert.equal(defaultNlqRes.llmProvider, "mock");
     assert.ok(defaultNlqRes.tokensUsed > 0);

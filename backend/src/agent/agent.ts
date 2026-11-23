@@ -137,6 +137,7 @@ export async function runGuardianAgent(
   let llmCallsCount = 0;
   let usedProviderName: string = "deterministic";
   let usedModelName = "rules-fallback-v1";
+  let fallbackNotice: string | undefined;
 
   if (provider.providerName !== "deterministic") {
     try {
@@ -148,19 +149,52 @@ export async function runGuardianAgent(
         runtime,
         openCount: openAnomalies.length,
         recordsCount: activeRecords.length,
+        onCallAttempt: () => {
+          llmCallsCount += 1;
+        },
       });
       verdict = llmRes.verdict;
       tokensUsed = llmRes.tokensUsed;
       estimatedCostUsd = llmRes.costUsd;
-      llmCallsCount = llmRes.llmCallsCount;
       usedProviderName = provider.providerName;
       usedModelName = provider.modelName;
       usedLlm = true;
-    } catch {
-      // Fallback autonome sûr si le fournisseur externe échoue ou dépasse le budget
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message.toLowerCase() : "";
+      const reasonCode = /budget|token/.test(errorText)
+        ? "budget_exceeded"
+        : /429|resource_exhausted|rate.?limit/.test(errorText)
+          ? "rate_limited"
+          : /timeout|timed out|etimedout/.test(errorText)
+            ? "timeout"
+            : "provider_unavailable";
+      fallbackNotice =
+        reasonCode === "budget_exceeded"
+          ? "Le budget de traitement LLM a été atteint."
+          : reasonCode === "rate_limited"
+            ? "Le fournisseur LLM a limité les requêtes."
+            : reasonCode === "timeout"
+              ? "Le fournisseur LLM n’a pas répondu dans le délai prévu."
+              : "Le fournisseur LLM n’a pas répondu.";
+      journalRepo.addAgentAction(ctx, {
+        id: `act-llm-fallback-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tenantId: ctx.tenantId,
+        spaceId: ctx.spaceId,
+        runId,
+        timestamp: new Date().toISOString(),
+        toolName: "llm_fallback",
+        inputs: { llmProvider: provider.providerName, llmModel: provider.modelName },
+        output: { reasonCode, fallback: "rules-fallback-v1" },
+        decision: `${fallbackNotice} Repli sur les règles locales; les cas ambigus restent soumis à validation.`,
+        confidence: 1,
+        author: "agent",
+        llmProvider: provider.providerName,
+        llmModel: provider.modelName,
+        reversible: false,
+        reverted: false,
+      });
       usedProviderName = "deterministic";
       usedModelName = "rules-fallback-v1";
-      llmCallsCount = 0;
     }
   }
 
@@ -170,6 +204,7 @@ export async function runGuardianAgent(
       runtime,
       rules,
       recordsCount: activeRecords.length,
+      fallbackNotice,
     });
   }
 
@@ -280,8 +315,9 @@ async function runLlmToolLoop(params: {
   runtime: ReturnType<typeof createScopedToolRuntime>;
   openCount: number;
   recordsCount: number;
-}): Promise<{ verdict: AgentVerdict; tokensUsed: number; costUsd: number; llmCallsCount: number }> {
-  const { ctx, provider, runId, rules, runtime, openCount, recordsCount } = params;
+  onCallAttempt: () => void;
+}): Promise<{ verdict: AgentVerdict; tokensUsed: number; costUsd: number }> {
+  const { ctx, provider, runId, rules, runtime, openCount, recordsCount, onCallAttempt } = params;
 
   const system = `Agent autonome Gardien de données (MEAL). Données PII pseudonymisées.
 - Utilisez list_anomalies puis compare_records et propose_merge (>= ${rules.duplicateDetection.nearDuplicate.autoMergeThreshold} auto, sinon validation) et request_validation pour cas ambigus, âges aberrants, copier-coller enquêteur et écarts GPS/zone d'intervention.
@@ -301,13 +337,14 @@ async function runLlmToolLoop(params: {
   for (let turn = 0; turn < 10; turn++) {
     if (totalTokens >= rules.guardrails.maxTokensPerRun) throw new Error("Budget tokens dépassé.");
     const callStartMs = Date.now();
+    llmCallsCount += 1;
+    onCallAttempt();
     const response = await provider.chat({
       system,
       messages,
       tools: GUARDIAN_TOOL_DECLARATIONS,
     });
     const callDurationMs = Date.now() - callStartMs;
-    llmCallsCount += 1;
     totalTokens += response.usage.totalTokens;
     totalCostUsd += response.usage.costUsd;
 
@@ -357,6 +394,8 @@ async function runLlmToolLoop(params: {
   };
 
   const verdictStartMs = Date.now();
+  llmCallsCount += 1;
+  onCallAttempt();
   const finalResp = await provider.chat({
     system: "Répondez uniquement avec un objet JSON strict valide.",
     messages: [
@@ -366,7 +405,6 @@ async function runLlmToolLoop(params: {
     schema: verdictSchema,
   });
   const verdictDurationMs = Date.now() - verdictStartMs;
-  llmCallsCount += 1;
   totalTokens += finalResp.usage.totalTokens;
   totalCostUsd += finalResp.usage.costUsd;
 
@@ -392,7 +430,6 @@ async function runLlmToolLoop(params: {
     verdict: AgentVerdictSchema.parse(JSON.parse(cleanedJsonText || "{}")),
     tokensUsed: totalTokens,
     costUsd: Number(totalCostUsd.toFixed(6)),
-    llmCallsCount,
   };
 }
 
@@ -401,8 +438,9 @@ async function runDeterministicAgentFallback(params: {
   runtime: ReturnType<typeof createScopedToolRuntime>;
   rules: ProjectRulesConfig;
   recordsCount: number;
+  fallbackNotice?: string;
 }): Promise<AgentVerdict> {
-  const { openAnomalies, runtime, rules, recordsCount } = params;
+  const { openAnomalies, runtime, rules, recordsCount, fallbackNotice } = params;
   const actionsTaken: string[] = [];
 
   await runtime.executeTool("list_anomalies", { onlyOpen: true });
@@ -463,6 +501,9 @@ async function runDeterministicAgentFallback(params: {
 
   const summary = [
     `Contrôle MEAL sur ${recordsCount} enregistrements (${openAnomalies.length} anomalie(s) : ${countBySev.bloquante} bloquante(s), ${countBySev.a_verifier} à vérifier, ${countBySev.mineure} mineure(s)).`,
+    fallbackNotice
+      ? `Surveillance : ${fallbackNotice} Contrôle poursuivi par règles locales; aucun cas ambigu n'est validé automatiquement sans seuil suffisant.`
+      : "",
     `Actions : ${runtime.autoActionsCount} action(s) automatique(s) réversible(s), ${runtime.pendingValidationsCount} dossier(s) en validation humaine.`,
     verificationTargets
       ? `\nMessage de vérification terrain (à confirmer par le superviseur) :\n${verificationTargets}\nMerci de vérifier les fiches concernées et de confirmer ou rejeter dans la file de validation avant clôture.`
