@@ -17,6 +17,11 @@ fi
 # 2. Remplacement du Pre-Deploy Command (mode gratuit Render) :
 #    initialisation / migration idempotente du schéma PostgreSQL avant lancement du serveur
 #    (initDb.js gère aussi l'absence de DATABASE_URL ou la lecture depuis .env)
+if [ "${RESET_LEGACY_DAKAR_DEMO:-0}" = "1" ]; then
+  echo "[MISAINA] Réinitialisation ponctuelle du tenant de démonstration Dakar..."
+  node dist/src/resetLegacyDemoData.js
+fi
+
 node dist/src/initDb.js
 
 # 3. Lancement du serveur HTTP principal (exec pour transmettre SIGTERM/SIGINT)
